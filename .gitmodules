@@ -1,3 +1,6 @@
 [submodule "engine"]
 	path = engine
 	url = https://github.com/xanytka-devs/firesteel.git
+[submodule "external/PortAudio"]
+	path = external/PortAudio
+	url = https://github.com/PortAudio/portaudio.git

@@ -1,52 +1,100 @@
 #include <firesteel/firesteel.hpp>
 using namespace Firesteel;
+#include <firesteel/utils/os.hpp>
+#include <imgui/misc/cpp/imgui_stdlib.h>
+#include "microphone_sampler.hpp"
 
-// Entities are basicly 3d models,
-// that will be rendered in update function.
+struct AvatarLayer {
+public:
+	bool enabled = true;
+	std::string name = "Layer";
+	std::string path = "";
+};
+
 Entity box{glm::vec3(0, 0, -5), glm::vec3(45, 45, 0)};
-// Shader that will define how the box is drawn.
-// Learn more: https://learnopengl.com/Getting-started/Shaders
 std::shared_ptr<Shader> shader;
-// Camera that will help with displaying box in perspective.
 Camera camera{glm::vec3(0), glm::vec3(0, 0, -90)};
 
-class ExampleApp : public App {
-	// Runs after window and renderer initialization.
+std::string avatarPath="my_avatar.tubepng.json";
+std::vector<std::string> viableAvatarFormats = {
+	"Uncompressed avatar (*.tubepng.json)", "*.tubepng.json",
+};
+std::vector<AvatarLayer> layers;
+uint selectedSpriteId = 0;
+std::vector<std::string> viableImageFormats = {
+	"PNG (*.png)", "*.png",
+	"JPG (*.jpg *.jpeg)", "*.jpg *.jpeg",
+	"All files", "*",
+};
+
+class TubePngApp : public App {
 	void onInitialize() override {
-		// Loads model for entity from file.
 		box.load("res\\box.obj");
-		// Initializes shader from vertex and fragment ones.
 		shader=std::make_shared<Shader>("res/shader.vs", "res/shader.fs");
 		box.setMaterialsShader(shader);
-		// Get current camera vectors;
 		camera.update();
+		AudioIO::initialize();
+		AudioIO::start();
 	}
 	
-	// Runs each frame.
 	void onUpdate() override {
-		// Update camera aspect.
 		camera.aspect = window.aspect();
-		// Store camera's view and projection.
-		// Learn more: https://learnopengl.com/Getting-started/Camera
 		glm::mat4 projection = camera.getProjection(),
 			view = camera.getView();
-		// Enables and sets parameters of shader for box.
 		shader->enable();
 		shader->setMat4("projection", projection);
 		shader->setMat4("view", view);
-		// Draw the box itself.
 		box.draw();
+
+		drawUI();
+	}
+	void drawUI() {
+		ImGui::Begin("Main");
+		ImGui::Text("Avatar");
+		ImGui::BeginDisabled();
+		ImGui::InputText("##save_avatar_path", &avatarPath);
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		if (ImGui::Button("...##save_avatar")) {
+			auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
+			if (r.size() > 0) {
+				avatarPath = r[0];
+			}
+		}
+		ImGui::Text("Layers");
+		for (uint i = 0; i < layers.size(); i++) {
+			AvatarLayer& layer = layers[i];
+			if(ImGui::MenuItem((layer.name+"##layer_"+std::to_string(i)).c_str())) selectedSpriteId = i;
+		}
+		if (ImGui::Button("+ Add layer")) {
+			layers.push_back(AvatarLayer{ true, "Layer "+std::to_string(layers.size()),"" });
+		}
+		if (layers.size() > 0 && selectedSpriteId < layers.size()) {
+			AvatarLayer& layer = layers[selectedSpriteId];
+			ImGui::Text("Sprite layer");
+			ImGui::InputText("##sprite_name", &layer.name);
+			ImGui::BeginDisabled();
+			ImGui::InputText("##select_sprite_path", &layer.path);
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("...##select_sprite")) {
+				auto r = OS::fileDialog(false, false, "", &viableImageFormats, "Select layer sprite");
+				if (r.size() > 0) {
+					layer.path = r[0];
+				}
+			}
+		}
+		ImGui::End();
 	}
 	
-	// Runs after window.close() is called or on window closing.
 	void onShutdown() override {
-		// Clean up leftover resources.
+		AudioIO::stop();
+		AudioIO::remove();
 		box.remove();
 		shader->remove();
 	}
 };
 
 int main() {
-	// Initializes your application.
-	return ExampleApp{}.start();
+	return TubePngApp{}.start("tube.png");
 }
