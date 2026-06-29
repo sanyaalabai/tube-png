@@ -4,3 +4,6 @@
 [submodule "external/PortAudio"]
 	path = external/PortAudio
 	url = https://github.com/PortAudio/portaudio.git
+[submodule "external/aubio"]
+	path = external/aubio
+	url = https://github.com/aubio/aubio.git

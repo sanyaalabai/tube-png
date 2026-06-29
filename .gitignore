@@ -15,3 +15,14 @@ ZERO_CHECK.log
 # Build resources
 build/*
 !build/res/
+!build/aubio.dll
+!build/aubio.lib
+!build/FLAC.dll
+!build/libmp3lame.dll
+!build/mpg123.dll
+!build/ogg.dll
+!build/opus.dll
+!build/portaudio.lib
+!build/vorbis.dll
+!build/vorbisenc.dll
+!build/vorbisfile.dll
