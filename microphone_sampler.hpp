@@ -1,7 +1,7 @@
 #include <PortAudio/include/portaudio.h>
 #define HAVE_C99_VARARGS_MACROS
 #include <aubio/src/aubio.h>
-#include <firesteel/utils/log.hpp>
+#include <firesteel/util/log.hpp>
 
 const int SAMPLE_RATE = 44100;
 const int HOP_SIZE = 512;
@@ -9,18 +9,19 @@ const int BUFFER_SIZE = 2048;
 
 namespace AudioIO {
 	struct AudioData {
-		aubio_pitch_t* pitchProcessor;
-		fvec_t* in;
-		fvec_t* out;
+		aubio_pitch_t* pitchProcessor=nullptr;
+		fvec_t* in=nullptr;
+		fvec_t* out=nullptr;
 		float rms=0;
 		float dB=0;
 		float pitch=0;
 	};
 	struct AudioReciever {
-		const char* name;
-		AudioData data;
-		PaStream* stream;
+		const char* name="";
+		AudioData data{};
+		PaStream* stream=nullptr;
 		bool streamOpen=false;
+		bool muted=false;
 
 		float amplifier=1.f;
 		float cutOff=-45.f;
@@ -60,7 +61,7 @@ namespace AudioIO {
 	static int streamCallback(const void* inBuf, void* outBuf, ulong framesPerBuf, const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags flags, void* userData) {
 		auto* data = static_cast<AudioData*>(userData);
 		const float* in = static_cast<const float*>(inBuf);
-		if(inBuf == nullptr) return paContinue;
+		if(inBuf == nullptr || reciever.muted) return paContinue;
 		for (uint i = 0;i < framesPerBuf;i++) {
 			data->in->data[i] = in[i];
 		}
