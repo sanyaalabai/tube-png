@@ -52,6 +52,7 @@ add_optional_dependency (FLAC flac)
 
 # generate config.h
 target_compile_definitions (aubio PRIVATE HAVE_CONFIG_H)
+target_compile_definitions (aubio PRIVATE HAVE_C99_VARARGS_MACROS)
 target_include_directories (aubio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories (aubio PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 

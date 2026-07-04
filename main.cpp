@@ -258,7 +258,7 @@ class TubePngApp : public App {
 	}
 
 	void loadLayerTexture(AvatarLayer& tLayer) {
-		tLayer.texture.remove();
+		tLayer.texture.destroy();
 		bool mono = false;
 		tLayer.texture = Texture{ TextureFromFile(tLayer.texture.path, &mono, true), TT_DIFFUSE, tLayer.texture.path, mono };
 	}
@@ -294,7 +294,7 @@ class TubePngApp : public App {
 		}
 		for(uint i=0;i<layers.size();i++) {
 			auto& layer = layers[i];
-			layer.texture.remove();
+			layer.texture.destroy();
 		}
 		layers.clear();
 		std::ifstream ifs(tPath);
@@ -352,7 +352,7 @@ class TubePngApp : public App {
 		}
 		for(uint i=0;i<layers.size();i++) {
 			auto& layer = layers[i];
-			layer.texture.remove();
+			layer.texture.destroy();
 		}
 		layers.clear();
 		std::ifstream ifs(tPath);
@@ -390,12 +390,12 @@ class TubePngApp : public App {
 		AudioIO::remove();
 		for(uint i=0;i<layers.size();i++) {
 			auto& layer = layers[i];
-			layer.texture.remove();
+			layer.texture.destroy();
 		}
 		layers.clear();
-		box.remove();
-		spriteQuad.remove();
-		shader->remove();
+		box.destroy();
+		spriteQuad.destroy();
+		shader->destroy();
 		saveConfig("config.json");
 	}
 };
