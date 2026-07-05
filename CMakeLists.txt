@@ -23,6 +23,10 @@ target_link_libraries(tubepng
 target_compile_features(tubepng PUBLIC cxx_std_17)
 target_include_directories(tubepng PUBLIC engine/external/glfw)
 target_include_directories(tubepng PUBLIC external)
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT tubepng)
+
+set_target_properties(aubio PROPERTIES FOLDER "External")
+set_target_properties(portaudio PROPERTIES FOLDER "External")
 
 target_compile_definitions(aubio PRIVATE 
     _CRT_SECURE_NO_WARNINGS

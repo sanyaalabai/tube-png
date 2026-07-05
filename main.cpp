@@ -61,8 +61,6 @@ public:
 	uint offset=0;
 };
 
-Entity box{glm::vec3(0, 0, -5), glm::vec3(45, 45, 0)};
-bool showBox=true;
 bool haveAnyLayerSelected=false;
 bool fakeThresholdForSmoothTalking=true;
 int fakeThresholdForSmoothTalkingMs=500;
@@ -231,7 +229,6 @@ class TubePngApp : public App {
 		cfg["micro"]["name"] = AudioIO::reciever.name;
 		cfg["faker"]["enabled"] = fakeThresholdForSmoothTalking;
 		cfg["faker"]["ms"] = fakeThresholdForSmoothTalkingMs;
-		cfg["show_box"] = showBox;
 		cfg["show_all_rotation_dirs"] = showAllRotationDirs;
 		cfg["background"]["color"] = { window.getClearColor().r, window.getClearColor().g, window.getClearColor().b, window.getClearColor().a };
 		cfg["avatar"]["blinking"] = calcBlinking;
@@ -264,7 +261,6 @@ class TubePngApp : public App {
 				if(cfg["faker"].contains("enabled")) fakeThresholdForSmoothTalking = cfg["faker"]["enabled"];
 				if(cfg["faker"].contains("ms")) fakeThresholdForSmoothTalkingMs = cfg["faker"]["ms"];
 			}
-			if(cfg.contains("show_box")) showBox = cfg["show_box"];
 			if(cfg.contains("show_all_rotation_dirs")) showAllRotationDirs = cfg["show_all_rotation_dirs"];
 			if(cfg.contains("avatar")) {
 				if(cfg["avatar"].contains("last")) avatarPath = cfg["avatar"]["last"];
@@ -286,11 +282,9 @@ class TubePngApp : public App {
 
 	void onInitialize() override {
 		if(!std::filesystem::exists("avatars")) std::filesystem::create_directory("avatars");
-		box.load("res\\box.obj");
 		spriteQuad.load("res\\quad.obj");
 		//spriteQuad.pushMesh(Geometry::quad());
 		shader=std::make_shared<Shader>("res/shader.vs", "res/shader.fs");
-		box.setMaterialsShader(shader);
 		spriteQuad.replaceMaterials(std::make_shared<Material>(), true);
 		spriteQuad.setMaterialsShader(shader);
 		camera.update();
@@ -319,13 +313,6 @@ class TubePngApp : public App {
 		shader->enable();
 		shader->setMat4("projection", projection);
 		shader->setMat4("view", view);
-		if(showBox) {
-			box.draw();
-			box.transform.rotation.x+=0.1f;
-			box.transform.rotation.y+=0.1f;
-			if(box.transform.rotation.x > 360.f) box.transform.rotation.x-=360.f;
-			if(box.transform.rotation.y > 360.f) box.transform.rotation.y-=360.f;
-		}
 
 		std::vector<bool> blinkingLayersCur;
 		if(calcBlinking)
@@ -453,7 +440,6 @@ class TubePngApp : public App {
 				ImGui::EndPopup();
 			}
 			ImGui::Text("General"); ImGui::SameLine(); ImGui::Separator();
-			ImGui::Checkbox("Show box", &showBox);
 			ImGui::Checkbox("Show all rotation directions", &showAllRotationDirs);
 			ImGui::Checkbox("Blinking", &calcBlinking);
 			if(ImGui::Checkbox("Transparent background", &transparentWindow)) {
@@ -556,7 +542,6 @@ class TubePngApp : public App {
 			layer.texture.destroy();
 		}
 		layers.clear();
-		box.destroy();
 		spriteQuad.destroy();
 		shader->destroy();
 		saveConfig("config.json");
