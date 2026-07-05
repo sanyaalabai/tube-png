@@ -9,12 +9,18 @@ using namespace Firesteel;
 enum AffectionState {
 	AS_UNAFFECTED,
 	AS_ON_TRUE,
-	AS_ON_FALSE
+	AS_ON_FALSE,
+	_SIZE
 };
-static std::string affectionStateToStr(const AffectionState& v) {
+static const char* affectionStateToStr(const AffectionState& v) {
 	if(v==0) return "none";
 	if(v==1) return "on_true";
 	return "on_false";
+}
+const char* affectionStateToGoodStr(AffectionState v) {
+	if(v == 0) return "Unaffected";
+	if(v == 1) return "On True";
+	return "On False";
 }
 static AffectionState strToAffectionState(const std::string& v) {
 	if(v=="on_true") return AS_ON_TRUE;
@@ -30,8 +36,16 @@ public:
 	glm::vec3 position{0,0,-2};
 	glm::vec3 rotation{};
 	glm::vec2 size{1};
+	uint blinkingLayerId=0;
 	AffectionState showOnTalking=AS_UNAFFECTED;
 	AffectionState showOnBlinking=AS_UNAFFECTED;
+};
+struct BlinkingLayer {
+public:
+	uint current=0;
+	uint blinkCooldown=1000;
+	uint blinkTime=200;
+	uint offset=0;
 };
 
 Entity box{glm::vec3(0, 0, -5), glm::vec3(45, 45, 0)};
@@ -40,17 +54,21 @@ bool haveAnyLayerSelected=false;
 bool fakeThresholdForSmoothTalking=true;
 int fakeThresholdForSmoothTalkingMs=500;
 int curThresholdForSmoothTalkingMs=0;
+bool calcBlinking=true;
 bool transparentWindow=true;
 Entity spriteQuad{};
 std::shared_ptr<Shader> shader;
 Camera camera{glm::vec3(0), glm::vec3(0, 0, -90)};
+
+bool layerInspectorWindowOpen=false;
 
 std::string avatarPath="my_avatar.tubepng.json";
 std::vector<std::string> viableAvatarFormats = {
 	"Uncompressed avatar (*.tubepng.json)", "*.tubepng.json",
 };
 std::vector<AvatarLayer> layers;
-uint selectedSpriteId = 0;
+std::vector<BlinkingLayer> blinkingLayers;
+uint selectedSpriteId=0;
 std::vector<std::string> viableImageFormats = {
 	"PNG (*.png)", "*.png",
 	"JPG (*.jpg *.jpeg)", "*.jpg *.jpeg",
@@ -68,6 +86,7 @@ class TubePngApp : public App {
 		spriteQuad.replaceMaterials(std::make_shared<Material>(), true);
 		spriteQuad.setMaterialsShader(shader);
 		camera.update();
+		blinkingLayers.resize(16);
 		loadConfig("config.json");
 		if(std::filesystem::exists(avatarPath)) loadAvatar(avatarPath);
 		AudioIO::initialize();
@@ -90,19 +109,38 @@ class TubePngApp : public App {
 			if(box.transform.rotation.x > 360.f) box.transform.rotation.x-=360.f;
 			if(box.transform.rotation.y > 360.f) box.transform.rotation.y-=360.f;
 		}
+
+		std::vector<bool> blinkingLayersCur;
+		if(calcBlinking)
+			for(uint i=0;i<blinkingLayers.size();i++) {
+				auto& l=blinkingLayers[i];
+				l.current+=1;
+				bool b=l.current>=l.blinkCooldown;
+				if(b) if(l.current>=(l.blinkCooldown+l.blinkTime)) {
+					b=false;
+					l.current=0;
+				}
+				blinkingLayersCur.push_back(b);
+			}
 		
 		bool talking=AudioIO::reciever.data.dB>=AudioIO::reciever.cutOff;
 		if(fakeThresholdForSmoothTalking) {
 			if(talking) curThresholdForSmoothTalkingMs=fakeThresholdForSmoothTalkingMs;
-			else talking = curThresholdForSmoothTalkingMs > 0;
-			curThresholdForSmoothTalkingMs -= 1;
+			else talking=curThresholdForSmoothTalkingMs>0;
+			curThresholdForSmoothTalkingMs-=1;
 		}
 
 		for(uint i=0;i<layers.size();i++) {
 			auto& layer=layers[i];
+
 			if(!layer.enabled) continue;
 			if(layer.showOnTalking==AS_ON_TRUE && !talking) continue;
 			if(layer.showOnTalking==AS_ON_FALSE && talking) continue;
+			if(calcBlinking) {
+				if(layer.showOnBlinking==AS_ON_TRUE && !blinkingLayersCur[layer.blinkingLayerId]) continue;
+				if(layer.showOnBlinking==AS_ON_FALSE && blinkingLayersCur[layer.blinkingLayerId]) continue;
+			}
+
 			spriteQuad.transform.position = layer.position;
 			spriteQuad.transform.rotation = layer.rotation;
 			spriteQuad.transform.size = { layer.size, 1 };
@@ -112,16 +150,6 @@ class TubePngApp : public App {
 			shader->setMat4("model", spriteQuad.transform.getMatrix());
 			
 			spriteQuad.model.meshes[0].draw(NULL, true);
-		}
-
-		if(AudioIO::reciever.data.dB>=AudioIO::reciever.cutOff) {
-			spriteQuad.transform.size.x = 1.2f;
-			spriteQuad.transform.size.y = 1.2f;
-			spriteQuad.transform.size.z = 1.2f;
-		} else {
-			spriteQuad.transform.size.x = 1.f;
-			spriteQuad.transform.size.y = 1.f;
-			spriteQuad.transform.size.z = 1.f;
 		}
 
 		drawUI();
@@ -145,6 +173,7 @@ class TubePngApp : public App {
 			ImGui::EndPopup();
 		}
 		ImGui::Checkbox("Show box", &showBox);
+		ImGui::Checkbox("Blinking", &calcBlinking);
 		if(ImGui::Checkbox("Transparent background", &transparentWindow)) {
 			glm::vec3 bgc = window.getClearColor();
 			window.setClearColor({ bgc, !transparentWindow });
@@ -215,14 +244,17 @@ class TubePngApp : public App {
 				if(ImGui::MenuItem((layer.name+"##layer_"+std::to_string(i)).c_str(), NULL, selectedSpriteId==i && haveAnyLayerSelected)) {
 					selectedSpriteId = i;
 					haveAnyLayerSelected = true;
+					layerInspectorWindowOpen = true;
 				}
 			}
 			if(ImGui::Button("+ Add layer")) {
 				layers.push_back(AvatarLayer{ true, "Layer " + std::to_string(layers.size()) });
 			}
 		}
-		if (layers.size() > 0 && selectedSpriteId < layers.size() && haveAnyLayerSelected) {
-			if(ImGui::CollapsingHeader("Sprite layer")) {
+		ImGui::End();
+		if(layerInspectorWindowOpen) {
+			ImGui::Begin("Sprite Layer", &layerInspectorWindowOpen);
+			if(layers.size() > 0 && selectedSpriteId < layers.size() && haveAnyLayerSelected) {
 				AvatarLayer& layer = layers[selectedSpriteId];
 				ImGui::Checkbox("##layer_enabled", &layer.enabled);
 				ImGui::SameLine();
@@ -249,12 +281,28 @@ class TubePngApp : public App {
 				ImGui::DragFloat3("Rotation", &layer.rotation);
 				ImGui::DragFloat2("Scale", &layer.size);
 				ImGui::Separator();
-				int s = layer.showOnTalking;
-				if(ImGui::SliderInt("Show on talking", &s, 0, 2))
-					layer.showOnTalking = static_cast<AffectionState>(s);
+				ImGui::SliderEnum<AffectionState>("Show on talking", &layer.showOnTalking, affectionStateToGoodStr,
+					AS_UNAFFECTED, AS_ON_FALSE);
+				ImGui::SliderEnum<AffectionState>("Show on blinking", &layer.showOnBlinking, affectionStateToGoodStr,
+					AS_UNAFFECTED, AS_ON_FALSE);
+				if(layer.showOnBlinking!=AS_UNAFFECTED) {
+					if(!calcBlinking) ImGui::Text("You have blinking disabled. Changes won't be visible");
+					ImGui::SliderUInt("Blinking layer", &layer.blinkingLayerId, 0, 16);
+					BlinkingLayer& blayer=blinkingLayers[layer.blinkingLayerId];
+
+					bool changed=ImGui::SliderUInt("Cooldown", &blayer.blinkCooldown, 0, 10000);
+					changed=ImGui::SliderUInt("Time", &blayer.blinkTime, 0, 10000)||changed;
+					changed=ImGui::SliderUInt("Offset", &blayer.offset, 0, 10000)||changed;
+
+					if(changed&&calcBlinking) for(uint i=0;i<blinkingLayers.size();i++) blinkingLayers[i].current=blinkingLayers[i].offset;
+				}
+			} else {
+				ImGui::Text("No Layer selected");
+				selectedSpriteId = 0;
+				haveAnyLayerSelected = false;
 			}
+			ImGui::End();
 		}
-		ImGui::End();
 	}
 
 	void loadLayerTexture(AvatarLayer& tLayer) {
@@ -265,7 +313,7 @@ class TubePngApp : public App {
 	void saveAvatar(const std::string& tPath) {
 		nlohmann::json scene;
 		scene["ver"]=1;
-		for (uint i=0;i<layers.size();i++) {
+		for(uint i=0;i<layers.size();i++) {
 			auto& layer=layers[i];
 			scene["layers"][i]["enabled"]=layer.enabled;
 			scene["layers"][i]["name"]=layer.name;
@@ -281,6 +329,14 @@ class TubePngApp : public App {
 			scene["layers"][i]["scale"]["y"]=layer.size.y;
 
 			scene["layers"][i]["on_talking"]=affectionStateToStr(layer.showOnTalking);
+			scene["layers"][i]["on_blinking"]=affectionStateToStr(layer.showOnBlinking);
+			scene["layers"][i]["blinking_layer"]=layer.blinkingLayerId;
+		}
+		for(uint i=0;i<blinkingLayers.size();i++) {
+			auto& layer=blinkingLayers[i];
+			scene["blinking_layers"][i]["cooldown"]=layer.blinkCooldown;
+			scene["blinking_layers"][i]["time"]=layer.blinkTime;
+			scene["blinking_layers"][i]["offset"]=layer.offset;
 		}
 		std::ofstream o(tPath);
 		o << scene << std::endl;
@@ -301,8 +357,8 @@ class TubePngApp : public App {
 		try {
 			nlohmann::json scene = nlohmann::json::parse(ifs);
 			ifs.close();
-			if (scene.contains("layers"))
-				for (uint i=0;i<scene["layers"].size();i++) {
+			if(scene.contains("layers"))
+				for(uint i=0;i<scene["layers"].size();i++) {
 					nlohmann::json local = scene["layers"][i];
 					AvatarLayer layer{};
 					if(local.contains("enabled")) layer.enabled = local["enabled"];
@@ -320,7 +376,19 @@ class TubePngApp : public App {
 						layer.size = { local["scale"]["x"], local["scale"]["y"] };
 
 					if(local.contains("on_talking")) layer.showOnTalking = strToAffectionState(local["on_talking"]);
+					if(local.contains("on_blinking")) layer.showOnBlinking = strToAffectionState(local["on_blinking"]);
+					if(local.contains("blinking_layer")) layer.blinkingLayerId = local["blinking_layer"];
 					layers.emplace_back(layer);
+				}
+			if(scene.contains("blinking_layers"))
+				for(uint i=0;i<scene["blinking_layers"].size();i++) {
+					nlohmann::json local = scene["blinking_layers"][i];
+					BlinkingLayer layer{};
+					if(local.contains("cooldown")) layer.blinkCooldown=local["cooldown"];
+					if(local.contains("time")) layer.blinkCooldown=local["time"];
+					if(local.contains("offset")) layer.blinkCooldown=local["offset"];
+					layer.current=layer.offset;
+					blinkingLayers.push_back(layer);
 				}
 		} catch(const std::runtime_error& e) {
 			LOGF_ERRR("Failed to parse avatar: %s", e.what());
@@ -339,6 +407,7 @@ class TubePngApp : public App {
 		cfg["faker"]["ms"] = fakeThresholdForSmoothTalkingMs;
 		cfg["show_box"] = showBox;
 		cfg["background"]["color"] = { window.getClearColor().r, window.getClearColor().g, window.getClearColor().b, window.getClearColor().a };
+		cfg["avatars"]["blinking"] = calcBlinking;
 		cfg["avatars"]["last"] = avatarPath;
 		std::ofstream o(tPath);
 		o << cfg << std::endl;
@@ -371,6 +440,7 @@ class TubePngApp : public App {
 			if(cfg.contains("show_box")) showBox = cfg["show_box"];
 			if(cfg.contains("avatars")) {
 				if(cfg["avatars"].contains("last")) avatarPath = cfg["avatars"]["last"];
+				if(cfg["avatars"].contains("blinking")) calcBlinking = cfg["avatars"]["blinking"];
 			}
 			if(cfg.contains("background")) {
 				if(cfg["background"].contains("color")) if(cfg["background"]["color"].size() == 4) {
