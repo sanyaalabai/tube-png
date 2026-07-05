@@ -38,7 +38,17 @@ namespace AudioIO {
 
 		for(int i=0;i<numDevices;i++) {
 			const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i);
-			if(deviceInfo->maxInputChannels > 0) o.push_back(deviceInfo);
+			if(deviceInfo->maxInputChannels>0) {
+#ifdef _WIN32
+				std::string name(deviceInfo->name);
+				//Remove fake Windows input devices.
+				if(name.find("[Loopback]")!=std::string::npos ||
+					name.find("loopback")!=std::string::npos) continue;
+				const PaHostApiInfo* hostInfo=Pa_GetHostApiInfo(deviceInfo->hostApi);
+				if(hostInfo && hostInfo->type!=paWASAPI) continue;
+#endif // _WIN32
+				o.push_back(deviceInfo);
+			}
 		}
 		return o;
 	}

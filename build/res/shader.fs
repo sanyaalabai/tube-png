@@ -9,4 +9,5 @@ uniform Material material;
 
 void main() {
 	frag_COLOR = texture(material.diffuse0, frag_UV);
+	if(frag_COLOR.a < 0.1) discard;
 }

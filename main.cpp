@@ -1,5 +1,7 @@
 #include <firesteel/firesteel.hpp>
 using namespace Firesteel;
+#include <firesteel/input/keyboard.hpp>
+#include <firesteel/util/delta_time.hpp>
 #include <firesteel/util/os.hpp>
 #include <firesteel/util/geometry.hpp>
 #include <firesteel/util/stbi_global.hpp>
@@ -22,6 +24,11 @@ const char* affectionStateToGoodStr(AffectionState v) {
 	if(v == 1) return "On True";
 	return "On False";
 }
+const char* asStrPhysical(AffectionState v) {
+	if(v == 0) return "Unaffected";
+	if(v == 1) return "When open";
+	return "When closed";
+}
 static AffectionState strToAffectionState(const std::string& v) {
 	if(v=="on_true") return AS_ON_TRUE;
 	if(v=="on_false") return AS_ON_FALSE;
@@ -33,11 +40,17 @@ public:
 	bool enabled=true;
 	std::string name="Layer";
 	Texture texture{};
+
 	glm::vec3 position{0,0,-2};
 	glm::vec3 rotation{};
 	glm::vec2 size{1};
-	uint blinkingLayerId=0;
+
+	glm::vec3 rotationTalkChange{};
+	glm::vec3 positionTalkChange{};
+	glm::vec2 sizeTalkChange{};
+
 	AffectionState showOnTalking=AS_UNAFFECTED;
+	uint blinkingLayerId=0;
 	AffectionState showOnBlinking=AS_UNAFFECTED;
 };
 struct BlinkingLayer {
@@ -56,11 +69,13 @@ int fakeThresholdForSmoothTalkingMs=500;
 int curThresholdForSmoothTalkingMs=0;
 bool calcBlinking=true;
 bool transparentWindow=true;
+bool showAllRotationDirs=false;
 Entity spriteQuad{};
 std::shared_ptr<Shader> shader;
 Camera camera{glm::vec3(0), glm::vec3(0, 0, -90)};
 
 bool layerInspectorWindowOpen=false;
+bool configOpen=false;
 
 std::string avatarPath="my_avatar.tubepng.json";
 std::vector<std::string> viableAvatarFormats = {
@@ -76,6 +91,199 @@ std::vector<std::string> viableImageFormats = {
 std::vector<const PaDeviceInfo*> inputDevices;
 
 class TubePngApp : public App {
+	void loadLayerTexture(AvatarLayer& tLayer) {
+		tLayer.texture.destroy();
+		bool mono = false;
+		tLayer.texture = Texture{ TextureFromFile(tLayer.texture.path, &mono, true), TT_DIFFUSE, tLayer.texture.path, mono };
+	}
+
+	void saveAvatar(std::string& tPath) {
+		nlohmann::json scene;
+		scene["ver"]=1;
+		for(uint i=0;i<layers.size();i++) {
+			auto& layer=layers[i];
+			scene["layers"][i]["enabled"]=layer.enabled;
+			scene["layers"][i]["name"]=layer.name;
+			scene["layers"][i]["tex"]=layer.texture.path;
+
+			if(layer.position!=glm::vec3(0,0,-2)) {
+				scene["layers"][i]["position"][0]=layer.position.x;
+				scene["layers"][i]["position"][1]=layer.position.y;
+				scene["layers"][i]["position"][2]=layer.position.z;
+			}
+			if(layer.rotation!=glm::vec3(0)) {
+				scene["layers"][i]["rotation"][0]=layer.rotation.x;
+				scene["layers"][i]["rotation"][1]=layer.rotation.y;
+				scene["layers"][i]["rotation"][2]=layer.rotation.z;
+			}
+			if(layer.size!=glm::vec2(1)) {
+				scene["layers"][i]["scale"][0]=layer.size.x;
+				scene["layers"][i]["scale"][1]=layer.size.y;
+			}
+
+			if(layer.positionTalkChange!=glm::vec3(0)) {
+				scene["layers"][i]["on_talk"]["position"][0] = layer.positionTalkChange.x;
+				scene["layers"][i]["on_talk"]["position"][1] = layer.positionTalkChange.y;
+				scene["layers"][i]["on_talk"]["position"][2] = layer.positionTalkChange.z;
+			}
+			if(layer.rotationTalkChange!=glm::vec3(0)) {
+				scene["layers"][i]["on_talk"]["rotation"][0] = layer.rotationTalkChange.x;
+				scene["layers"][i]["on_talk"]["rotation"][1] = layer.rotationTalkChange.y;
+				scene["layers"][i]["on_talk"]["rotation"][2] = layer.rotationTalkChange.z;
+			}
+			if(layer.sizeTalkChange!=glm::vec2(0)) {
+				scene["layers"][i]["on_talk"]["scale"][0] = layer.sizeTalkChange.x;
+				scene["layers"][i]["on_talk"]["scale"][1] = layer.sizeTalkChange.y;
+			}
+
+			if(layer.showOnTalking!=AS_UNAFFECTED) scene["layers"][i]["visiblity"]["on_talking"]=affectionStateToStr(layer.showOnTalking);
+			if(layer.showOnBlinking!=AS_UNAFFECTED) {
+				scene["layers"][i]["visiblity"]["on_blinking"] = affectionStateToStr(layer.showOnBlinking);
+				scene["layers"][i]["visiblity"]["blinking_layer"] = layer.blinkingLayerId;
+			}
+		}
+		for(uint i=0;i<blinkingLayers.size();i++) {
+			auto& layer=blinkingLayers[i];
+			if(layer.blinkCooldown==1000 && layer.blinkTime==200 && layer.offset==0) {
+				scene["blinking_layers"][i]=nlohmann::json::object();
+				continue;
+			}
+			scene["blinking_layers"][i]["cooldown"]=layer.blinkCooldown;
+			scene["blinking_layers"][i]["time"]=layer.blinkTime;
+			scene["blinking_layers"][i]["offset"]=layer.offset;
+		}
+		if(tPath.find(".tubepng.json")==std::string::npos) tPath+=".tubepng.json";
+		std::ofstream o(tPath);
+		o << scene << std::endl;
+		o.close();
+		LOG_INFO("Saved current avatar to: \"" + tPath + "\"");
+	}
+	bool loadAvatar(const std::string& tPath) {
+		if(!std::filesystem::exists(tPath)) {
+			LOG_ERRR("Avatar at path \"" + tPath + "\" doesn't exist");
+			return false;
+		}
+		for(uint i=0;i<layers.size();i++) {
+			auto& layer = layers[i];
+			layer.texture.destroy();
+		}
+		layers.clear();
+		std::ifstream ifs(tPath);
+		try {
+			nlohmann::json scene = nlohmann::json::parse(ifs);
+			ifs.close();
+			if(scene.contains("layers"))
+				for(uint i=0;i<scene["layers"].size();i++) {
+					nlohmann::json local = scene["layers"][i];
+					AvatarLayer layer{};
+					if(local.contains("enabled")) layer.enabled = local["enabled"];
+					if(local.contains("name")) layer.name = local["name"];
+					if(local.contains("tex")) {
+						layer.texture.path = local["tex"];
+						loadLayerTexture(layer);
+					}
+
+					if(local.contains("position")) if (local["position"].size()==3)
+						layer.position = { local["position"][0], local["position"][1], local["position"][2] };
+					if(local.contains("rotation")) if(local["rotation"].size()==3)
+						layer.rotation = { local["rotation"][0], local["rotation"][1], local["rotation"][2] };
+					if(local.contains("scale")) if(local["scale"].size() == 2)
+						layer.size = { local["scale"][0], local["scale"][1] };
+
+					if (local.contains("on_talk")) {
+						if(local["on_talk"].contains("position")) if (local["on_talk"]["position"].size() == 3)
+							layer.positionTalkChange = { local["on_talk"]["position"][0], local["on_talk"]["position"][1], local["on_talk"]["position"][2] };
+						if(local["on_talk"].contains("rotation")) if(local["on_talk"]["rotation"].size() == 3)
+							layer.rotationTalkChange = { local["on_talk"]["rotation"][0], local["on_talk"]["rotation"][1], local["on_talk"]["rotation"][2] };
+						if(local["on_talk"].contains("scale")) if(local["on_talk"]["scale"].size() == 2)
+							layer.sizeTalkChange = { local["on_talk"]["scale"][0], local["on_talk"]["scale"][1] };
+					}
+
+					if(local.contains("visiblity")) {
+						if(local.contains("on_talking")) layer.showOnTalking = strToAffectionState(local["on_talking"]);
+						if(local.contains("on_blinking")) layer.showOnBlinking = strToAffectionState(local["on_blinking"]);
+						if(local.contains("blinking_layer")) layer.blinkingLayerId = local["blinking_layer"];
+					}
+					layers.emplace_back(layer);
+				}
+			if(scene.contains("blinking_layers"))
+				for(uint i=0;i<scene["blinking_layers"].size();i++) {
+					nlohmann::json local = scene["blinking_layers"][i];
+					BlinkingLayer layer{};
+					if(local.contains("cooldown")) layer.blinkCooldown=local["cooldown"];
+					if(local.contains("time")) layer.blinkCooldown=local["time"];
+					if(local.contains("offset")) layer.blinkCooldown=local["offset"];
+					layer.current=layer.offset;
+					blinkingLayers.push_back(layer);
+				}
+		} catch(const std::runtime_error& e) {
+			LOGF_ERRR("Failed to parse avatar: %s", e.what());
+			return false;
+		}
+		LOG_INFO("Loaded avatar from: \"" + tPath + "\"");
+		return true;
+	}
+
+	void saveConfig(const std::string& tPath) {
+		nlohmann::json cfg;
+		cfg["micro"]["amp"] = AudioIO::reciever.amplifier;
+		cfg["micro"]["cut_off"] = AudioIO::reciever.cutOff;
+		cfg["micro"]["name"] = AudioIO::reciever.name;
+		cfg["faker"]["enabled"] = fakeThresholdForSmoothTalking;
+		cfg["faker"]["ms"] = fakeThresholdForSmoothTalkingMs;
+		cfg["show_box"] = showBox;
+		cfg["show_all_rotation_dirs"] = showAllRotationDirs;
+		cfg["background"]["color"] = { window.getClearColor().r, window.getClearColor().g, window.getClearColor().b, window.getClearColor().a };
+		cfg["avatar"]["blinking"] = calcBlinking;
+		cfg["avatar"]["last"] = avatarPath;
+		std::ofstream o(tPath);
+		o << cfg << std::endl;
+		o.close();
+		LOG_INFO("Saved config to: \"" + tPath + "\"");
+	}
+	bool loadConfig(const std::string& tPath) {
+		if(!std::filesystem::exists(tPath)) {
+			LOG_ERRR("Avatar at path \"" + tPath + "\" doesn't exist");
+			return false;
+		}
+		for(uint i=0;i<layers.size();i++) {
+			auto& layer = layers[i];
+			layer.texture.destroy();
+		}
+		layers.clear();
+		std::ifstream ifs(tPath);
+		try {
+			nlohmann::json cfg = nlohmann::json::parse(ifs);
+			ifs.close();
+			if(cfg.contains("micro")) {
+				if(cfg["micro"].contains("amp")) AudioIO::reciever.amplifier = cfg["micro"]["amp"];
+				if(cfg["micro"].contains("cut_off")) AudioIO::reciever.cutOff = cfg["micro"]["cut_off"];
+				if(cfg["micro"].contains("name")) AudioIO::reciever.name = cfg["micro"]["name"].get<std::string>().c_str();
+			}
+			if(cfg.contains("faker")) {
+				if(cfg["faker"].contains("enabled")) fakeThresholdForSmoothTalking = cfg["faker"]["enabled"];
+				if(cfg["faker"].contains("ms")) fakeThresholdForSmoothTalkingMs = cfg["faker"]["ms"];
+			}
+			if(cfg.contains("show_box")) showBox = cfg["show_box"];
+			if(cfg.contains("show_all_rotation_dirs")) showAllRotationDirs = cfg["show_all_rotation_dirs"];
+			if(cfg.contains("avatar")) {
+				if(cfg["avatar"].contains("last")) avatarPath = cfg["avatar"]["last"];
+				if(cfg["avatar"].contains("blinking")) calcBlinking = cfg["avatar"]["blinking"];
+			}
+			if(cfg.contains("background")) {
+				if(cfg["background"].contains("color")) if(cfg["background"]["color"].size() == 4) {
+					window.setClearColor({ cfg["background"]["color"][0], cfg["background"]["color"][1], cfg["background"]["color"][2], cfg["background"]["color"][3] });
+					transparentWindow=cfg["background"]["color"][3]==0;
+				}
+			}
+		} catch(const std::runtime_error& e) {
+			LOGF_ERRR("Failed to parse config: %s", e.what());
+			return false;
+		}
+		LOG_INFO("Loaded config from: \"" + tPath + "\"");
+		return true;
+	}
+
 	void onInitialize() override {
 		if(!std::filesystem::exists("avatars")) std::filesystem::create_directory("avatars");
 		box.load("res\\box.obj");
@@ -93,6 +301,15 @@ class TubePngApp : public App {
 		AudioIO::create(AudioIO::reciever.name);
 		AudioIO::start();
 		inputDevices=AudioIO::getInputDevices();
+		if(std::filesystem::exists("res/font.ttf")) {
+			ImGuiIO& io=ImGui::GetIO();
+			ImFont* imguiFont=io.Fonts->AddFontFromFileTTF("res/font.ttf", 14.0f, NULL, io.Fonts->GetGlyphRangesCyrillic());
+			if(imguiFont==NULL) {
+				critShutdown(-18, "Couldn't load ImGui font");
+				return;
+			}
+			io.FontDefault=imguiFont;
+		}
 	}
 	
 	void onUpdate() override {
@@ -130,6 +347,15 @@ class TubePngApp : public App {
 			curThresholdForSmoothTalkingMs-=1;
 		}
 
+		if(haveAnyLayerSelected) {
+			glm::vec3 moveVec{0};
+			if(Keyboard::getKey(KeyCode::LEFT)) moveVec.x-=0.1f;
+			if(Keyboard::getKey(KeyCode::RIGHT)) moveVec.x+=0.1f;
+			if(Keyboard::getKey(KeyCode::DOWN)) moveVec.y-=0.1f;
+			if(Keyboard::getKey(KeyCode::UP)) moveVec.y+=0.1f;
+			layers[selectedSpriteId].position+=moveVec*DeltaTime::get();
+		}
+
 		for(uint i=0;i<layers.size();i++) {
 			auto& layer=layers[i];
 
@@ -141,9 +367,9 @@ class TubePngApp : public App {
 				if(layer.showOnBlinking==AS_ON_FALSE && blinkingLayersCur[layer.blinkingLayerId]) continue;
 			}
 
-			spriteQuad.transform.position = layer.position;
-			spriteQuad.transform.rotation = layer.rotation;
-			spriteQuad.transform.size = { layer.size, 1 };
+			spriteQuad.transform.position = layer.position + (talking?layer.positionTalkChange:glm::vec3{});
+			spriteQuad.transform.rotation = layer.rotation + (talking?layer.rotationTalkChange:glm::vec3{});
+			spriteQuad.transform.size = glm::vec3(layer.size, 1) + (talking?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
 			layer.texture.bind();
 			shader->setInt("material.diffuse0", 0);
 			shader->setVec3("material.diffuse", glm::vec3(1));
@@ -155,89 +381,37 @@ class TubePngApp : public App {
 		drawUI();
 	}
 	void drawUI() {
-		ImGui::Begin("Main");
-		if(ImGui::BeginPopupModal("Select Microphone")) {
-			if(ImGui::Button("Refresh")) inputDevices=AudioIO::getInputDevices();
-			for(uint i=0;i<inputDevices.size();i++) {
-				const PaDeviceInfo* device=inputDevices[i];
-				if(AudioIO::reciever.name==device->name) continue;
-				if(ImGui::MenuItem(Log::formatStr("%s##%i", device->name, i).c_str())) {
-					LOGF("Selected device: %s", device->name);
-					AudioIO::stop();
-					AudioIO::close();
-					AudioIO::create(device->name);
-					ImGui::CloseCurrentPopup();
-				}
-			}
-			if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
-			ImGui::EndPopup();
-		}
-		ImGui::Checkbox("Show box", &showBox);
-		ImGui::Checkbox("Blinking", &calcBlinking);
-		if(ImGui::Checkbox("Transparent background", &transparentWindow)) {
-			glm::vec3 bgc = window.getClearColor();
-			window.setClearColor({ bgc, !transparentWindow });
-		}
-		if(!transparentWindow) {
-			glm::vec3 bgc = window.getClearColor();
-			if(ImGui::ColorEdit3("Background", &bgc)) window.setClearColor({ bgc, 1 });
-		}
-		if(ImGui::CollapsingHeader("Microphone")) {
-			ImGui::Text(Log::formatStr("%s", AudioIO::reciever.name).c_str());
-			ImGui::SameLine();
-			if(ImGui::Button((AudioIO::reciever.muted?"U##mute_microphone":"M##mute_microphone"))) {
-				AudioIO::reciever.muted=!AudioIO::reciever.muted;
-				if(AudioIO::reciever.muted) {
-					AudioIO::reciever.data.dB=-100;
-					AudioIO::reciever.data.rms=0;
-					AudioIO::reciever.data.pitch=0;
-				}
-			}
-			ImGui::SameLine();
-			if(ImGui::Button("...##select_microphone")) ImGui::OpenPopup("Select Microphone");
-			if(AudioIO::reciever.muted) ImGui::Text("Your microphone is muted");
-			ImGui::Text("Info");
-			ImGui::BeginDisabled();
-			ImGui::SliderFloat("Volume (dB)", &AudioIO::reciever.data.dB, -100, 0);
-			ImGui::SliderFloat("Pitch", &AudioIO::reciever.data.pitch, 0, 1000);
-			ImGui::EndDisabled();
-			ImGui::Text("Talking");
-			ImGui::SliderFloat("Cut Off", &AudioIO::reciever.cutOff, -100, 0);
-			ImGui::SliderFloat("Amplifier", &AudioIO::reciever.amplifier, 0, 5);
-			ImGui::Text("Threshold faker");
-			ImGui::Checkbox("Enabled", &fakeThresholdForSmoothTalking);
-			if(fakeThresholdForSmoothTalking) ImGui::SliderInt("Delay (ms)", &fakeThresholdForSmoothTalkingMs, 0, 10000);
-		}
-		if(ImGui::CollapsingHeader("Avatar Data")) {
-			ImGui::BeginDisabled();
-			ImGui::InputText("Path##save_avatar_path", &avatarPath);
-			ImGui::EndDisabled();
-			if (ImGui::Button("Save##save_avatar")) {
-				if(avatarPath.empty()||!std::filesystem::exists(avatarPath)) {
-					auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
-					if (r.size() > 0) {
-						avatarPath = r[0];
-						saveAvatar(avatarPath);
-					}
-				} else saveAvatar(avatarPath);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Save as...##save_as_avatar")) {
+		ImGui::Begin("Avatar");
+		ImGui::BeginDisabled();
+		ImGui::InputText("Path##save_avatar_path", &avatarPath);
+		ImGui::EndDisabled();
+		if (ImGui::Button("Save##save_avatar")) {
+			if(avatarPath.empty()||!std::filesystem::exists(avatarPath)) {
 				auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
 				if (r.size() > 0) {
 					avatarPath = r[0];
 					saveAvatar(avatarPath);
 				}
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Load##load_avatar")) {
-				auto r = OS::fileDialog(false, false, "", &viableAvatarFormats, "Select avatar load location");
-				if (r.size() > 0) {
-					avatarPath = r[0];
-					loadAvatar(avatarPath);
-				}
+			} else saveAvatar(avatarPath);
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Save as...##save_as_avatar")) {
+			auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
+			if (r.size() > 0) {
+				avatarPath = r[0];
+				saveAvatar(avatarPath);
 			}
 		}
+		ImGui::SameLine();
+		if (ImGui::Button("Load##load_avatar")) {
+			auto r = OS::fileDialog(false, false, "", &viableAvatarFormats, "Select avatar load location");
+			if (r.size() > 0) {
+				avatarPath = r[0];
+				loadAvatar(avatarPath);
+			}
+		}
+		ImGui::SameLine();
+		if(ImGui::Button("Options")) configOpen=true;
 		if(ImGui::CollapsingHeader("Layers")) {
 			for (uint i = 0; i < layers.size(); i++) {
 				AvatarLayer& layer = layers[i];
@@ -247,11 +421,76 @@ class TubePngApp : public App {
 					layerInspectorWindowOpen = true;
 				}
 			}
-			if(ImGui::Button("+ Add layer")) {
-				layers.push_back(AvatarLayer{ true, "Layer " + std::to_string(layers.size()) });
-			}
+			if(ImGui::Button("+ Add layer")) layers.push_back({ true, "Layer " + std::to_string(layers.size()) });
 		}
 		ImGui::End();
+		if(configOpen) {
+			ImGui::Begin("Options", &configOpen);
+			if(ImGui::BeginPopupModal("Select Microphone")) {
+				if(ImGui::Button("Refresh")) inputDevices=AudioIO::getInputDevices();
+				ImGui::SameLine();
+				if(ImGui::Button("Default")) {
+					AudioIO::stop();
+					AudioIO::close();
+					AudioIO::create();
+					AudioIO::start();
+					ImGui::CloseCurrentPopup();
+					LOGF("Selected device: %s", AudioIO::reciever.name);
+				}
+				for(uint i=0;i<inputDevices.size();i++) {
+					const PaDeviceInfo* device=inputDevices[i];
+					if(AudioIO::reciever.name==device->name) continue;
+					if(ImGui::MenuItem(Log::formatStr("%s##%i", device->name, i).c_str())) {
+						LOGF("Selected device: %s", device->name);
+						AudioIO::stop();
+						AudioIO::close();
+						AudioIO::create(device->name);
+						AudioIO::start();
+						ImGui::CloseCurrentPopup();
+					}
+				}
+				if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+				ImGui::EndPopup();
+			}
+			ImGui::Text("General"); ImGui::SameLine(); ImGui::Separator();
+			ImGui::Checkbox("Show box", &showBox);
+			ImGui::Checkbox("Show all rotation directions", &showAllRotationDirs);
+			ImGui::Checkbox("Blinking", &calcBlinking);
+			if(ImGui::Checkbox("Transparent background", &transparentWindow)) {
+				window.setClearColor({0,0,0,!transparentWindow});
+			}
+			if(!transparentWindow) {
+				glm::vec3 bgc = window.getClearColor();
+				if(ImGui::ColorEdit3("Background", &bgc)) window.setClearColor({ bgc, 1 });
+			}
+			ImGui::Text("Microphone"); ImGui::SameLine(); ImGui::Separator();
+			ImGui::Text(Log::formatStr("%s", AudioIO::reciever.name).c_str());
+			ImGui::SameLine();
+			if(ImGui::Button((AudioIO::reciever.muted?"U##mute_microphone":"M##mute_microphone"))) {
+				AudioIO::reciever.muted=!AudioIO::reciever.muted;
+				if(AudioIO::reciever.muted) {
+					AudioIO::stop();
+					AudioIO::reciever.data.dB=-100;
+					AudioIO::reciever.data.rms=0;
+					AudioIO::reciever.data.pitch=0;
+				} else AudioIO::start();
+			}
+			ImGui::SameLine();
+			if(ImGui::Button("...##select_microphone")) ImGui::OpenPopup("Select Microphone");
+			if(AudioIO::reciever.muted) ImGui::Text("Your microphone is muted");
+			ImGui::Text("Info");
+			ImGui::BeginDisabled();
+			ImGui::SliderFloat("Volume (dB)", &AudioIO::reciever.data.dB, -100, 0);
+			ImGui::SliderFloat("Pitch", &AudioIO::reciever.data.pitch, 0, 1000);
+			ImGui::EndDisabled();
+			ImGui::SliderFloat("Cut Off", &AudioIO::reciever.cutOff, -100, 0);
+			ImGui::SliderFloat("Amplifier", &AudioIO::reciever.amplifier, 0, 5);
+			ImGui::Text("Threshold faker");
+			ImGui::Checkbox("Enabled", &fakeThresholdForSmoothTalking);
+			if(fakeThresholdForSmoothTalking) ImGui::SliderInt("Delay (ms)", &fakeThresholdForSmoothTalkingMs, 0, 10000);
+
+			ImGui::End();
+		}
 		if(layerInspectorWindowOpen) {
 			ImGui::Begin("Sprite Layer", &layerInspectorWindowOpen);
 			if(layers.size() > 0 && selectedSpriteId < layers.size() && haveAnyLayerSelected) {
@@ -276,20 +515,25 @@ class TubePngApp : public App {
 						loadLayerTexture(layer);
 					}
 				}
-				ImGui::Separator();
+				ImGui::Text("Transform"); ImGui::SameLine(); ImGui::Separator();
 				ImGui::DragFloat3("Position", &layer.position);
-				ImGui::DragFloat3("Rotation", &layer.rotation);
+				if(showAllRotationDirs) ImGui::DragFloat3("Rotation", &layer.rotation);
+				else ImGui::DragFloat("Rotation", &layer.rotation.z);
 				ImGui::DragFloat2("Scale", &layer.size);
-				ImGui::Separator();
-				ImGui::SliderEnum<AffectionState>("Show on talking", &layer.showOnTalking, affectionStateToGoodStr,
-					AS_UNAFFECTED, AS_ON_FALSE);
-				ImGui::SliderEnum<AffectionState>("Show on blinking", &layer.showOnBlinking, affectionStateToGoodStr,
-					AS_UNAFFECTED, AS_ON_FALSE);
+				ImGui::Text("Voice alteration"); ImGui::SameLine(); ImGui::Separator();
+				ImGui::DragFloat3("Position delta", &layer.positionTalkChange);
+				if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta", &layer.rotationTalkChange);
+				else ImGui::DragFloat("Rotation delta", &layer.rotationTalkChange.z);
+				ImGui::DragFloat2("Scale delta", &layer.sizeTalkChange);
+				ImGui::Text("Visibility events"); ImGui::SameLine(); ImGui::Separator();
+				ImGui::SliderEnum<AffectionState>("Show on talking", &layer.showOnTalking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
+				ImGui::SliderEnum<AffectionState>("Show on blinking", &layer.showOnBlinking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
 				if(layer.showOnBlinking!=AS_UNAFFECTED) {
 					if(!calcBlinking) ImGui::Text("You have blinking disabled. Changes won't be visible");
 					ImGui::SliderUInt("Blinking layer", &layer.blinkingLayerId, 0, 16);
 					BlinkingLayer& blayer=blinkingLayers[layer.blinkingLayerId];
 
+					ImGui::Text("Blinking layer config"); ImGui::SameLine(); ImGui::Separator();
 					bool changed=ImGui::SliderUInt("Cooldown", &blayer.blinkCooldown, 0, 10000);
 					changed=ImGui::SliderUInt("Time", &blayer.blinkTime, 0, 10000)||changed;
 					changed=ImGui::SliderUInt("Offset", &blayer.offset, 0, 10000)||changed;
@@ -303,157 +547,6 @@ class TubePngApp : public App {
 			}
 			ImGui::End();
 		}
-	}
-
-	void loadLayerTexture(AvatarLayer& tLayer) {
-		tLayer.texture.destroy();
-		bool mono = false;
-		tLayer.texture = Texture{ TextureFromFile(tLayer.texture.path, &mono, true), TT_DIFFUSE, tLayer.texture.path, mono };
-	}
-	void saveAvatar(const std::string& tPath) {
-		nlohmann::json scene;
-		scene["ver"]=1;
-		for(uint i=0;i<layers.size();i++) {
-			auto& layer=layers[i];
-			scene["layers"][i]["enabled"]=layer.enabled;
-			scene["layers"][i]["name"]=layer.name;
-			scene["layers"][i]["tex"]=layer.texture.path;
-
-			scene["layers"][i]["position"]["x"]=layer.position.x;
-			scene["layers"][i]["position"]["y"]=layer.position.y;
-			scene["layers"][i]["position"]["z"]=layer.position.z;
-			scene["layers"][i]["rotation"]["x"]=layer.rotation.x;
-			scene["layers"][i]["rotation"]["y"]=layer.rotation.y;
-			scene["layers"][i]["rotation"]["z"]=layer.rotation.z;
-			scene["layers"][i]["scale"]["x"]=layer.size.x;
-			scene["layers"][i]["scale"]["y"]=layer.size.y;
-
-			scene["layers"][i]["on_talking"]=affectionStateToStr(layer.showOnTalking);
-			scene["layers"][i]["on_blinking"]=affectionStateToStr(layer.showOnBlinking);
-			scene["layers"][i]["blinking_layer"]=layer.blinkingLayerId;
-		}
-		for(uint i=0;i<blinkingLayers.size();i++) {
-			auto& layer=blinkingLayers[i];
-			scene["blinking_layers"][i]["cooldown"]=layer.blinkCooldown;
-			scene["blinking_layers"][i]["time"]=layer.blinkTime;
-			scene["blinking_layers"][i]["offset"]=layer.offset;
-		}
-		std::ofstream o(tPath);
-		o << scene << std::endl;
-		o.close();
-		LOG_INFO("Saved current avatar to: \"" + tPath + "\"");
-	}
-	bool loadAvatar(const std::string& tPath) {
-		if(!std::filesystem::exists(tPath)) {
-			LOG_ERRR("Avatar at path \"" + tPath + "\" doesn't exist");
-			return false;
-		}
-		for(uint i=0;i<layers.size();i++) {
-			auto& layer = layers[i];
-			layer.texture.destroy();
-		}
-		layers.clear();
-		std::ifstream ifs(tPath);
-		try {
-			nlohmann::json scene = nlohmann::json::parse(ifs);
-			ifs.close();
-			if(scene.contains("layers"))
-				for(uint i=0;i<scene["layers"].size();i++) {
-					nlohmann::json local = scene["layers"][i];
-					AvatarLayer layer{};
-					if(local.contains("enabled")) layer.enabled = local["enabled"];
-					if(local.contains("name")) layer.name = local["name"];
-					if(local.contains("tex")) {
-						layer.texture.path = local["tex"];
-						loadLayerTexture(layer);
-					}
-
-					if(local.contains("position")) if(local["position"].size() == 3)
-						layer.position = { local["position"]["x"], local["position"]["y"], local["position"]["z"] };
-					if(local.contains("rotation")) if(local["rotation"].size() == 3)
-						layer.rotation = { local["rotation"]["x"], local["rotation"]["y"], local["rotation"]["z"] };
-					if(local.contains("scale")) if(local["scale"].size() == 2)
-						layer.size = { local["scale"]["x"], local["scale"]["y"] };
-
-					if(local.contains("on_talking")) layer.showOnTalking = strToAffectionState(local["on_talking"]);
-					if(local.contains("on_blinking")) layer.showOnBlinking = strToAffectionState(local["on_blinking"]);
-					if(local.contains("blinking_layer")) layer.blinkingLayerId = local["blinking_layer"];
-					layers.emplace_back(layer);
-				}
-			if(scene.contains("blinking_layers"))
-				for(uint i=0;i<scene["blinking_layers"].size();i++) {
-					nlohmann::json local = scene["blinking_layers"][i];
-					BlinkingLayer layer{};
-					if(local.contains("cooldown")) layer.blinkCooldown=local["cooldown"];
-					if(local.contains("time")) layer.blinkCooldown=local["time"];
-					if(local.contains("offset")) layer.blinkCooldown=local["offset"];
-					layer.current=layer.offset;
-					blinkingLayers.push_back(layer);
-				}
-		} catch(const std::runtime_error& e) {
-			LOGF_ERRR("Failed to parse avatar: %s", e.what());
-			return false;
-		}
-		LOG_INFO("Loaded avatar from: \"" + tPath + "\"");
-		return true;
-	}
-
-	void saveConfig(const std::string& tPath) {
-		nlohmann::json cfg;
-		cfg["micro"]["amp"] = AudioIO::reciever.amplifier;
-		cfg["micro"]["cut_off"] = AudioIO::reciever.cutOff;
-		cfg["micro"]["name"] = AudioIO::reciever.name;
-		cfg["faker"]["enabled"] = fakeThresholdForSmoothTalking;
-		cfg["faker"]["ms"] = fakeThresholdForSmoothTalkingMs;
-		cfg["show_box"] = showBox;
-		cfg["background"]["color"] = { window.getClearColor().r, window.getClearColor().g, window.getClearColor().b, window.getClearColor().a };
-		cfg["avatars"]["blinking"] = calcBlinking;
-		cfg["avatars"]["last"] = avatarPath;
-		std::ofstream o(tPath);
-		o << cfg << std::endl;
-		o.close();
-		LOG_INFO("Saved config to: \"" + tPath + "\"");
-	}
-	bool loadConfig(const std::string& tPath) {
-		if(!std::filesystem::exists(tPath)) {
-			LOG_ERRR("Avatar at path \"" + tPath + "\" doesn't exist");
-			return false;
-		}
-		for(uint i=0;i<layers.size();i++) {
-			auto& layer = layers[i];
-			layer.texture.destroy();
-		}
-		layers.clear();
-		std::ifstream ifs(tPath);
-		try {
-			nlohmann::json cfg = nlohmann::json::parse(ifs);
-			ifs.close();
-			if(cfg.contains("micro")) {
-				if(cfg["micro"].contains("amp")) AudioIO::reciever.amplifier = cfg["micro"]["amp"];
-				if(cfg["micro"].contains("cut_off")) AudioIO::reciever.cutOff = cfg["micro"]["cut_off"];
-				if(cfg["micro"].contains("name")) AudioIO::reciever.name = cfg["micro"]["name"].get<std::string>().c_str();
-			}
-			if(cfg.contains("faker")) {
-				if(cfg["faker"].contains("enabled")) fakeThresholdForSmoothTalking = cfg["faker"]["enabled"];
-				if(cfg["faker"].contains("ms")) fakeThresholdForSmoothTalkingMs = cfg["faker"]["ms"];
-			}
-			if(cfg.contains("show_box")) showBox = cfg["show_box"];
-			if(cfg.contains("avatars")) {
-				if(cfg["avatars"].contains("last")) avatarPath = cfg["avatars"]["last"];
-				if(cfg["avatars"].contains("blinking")) calcBlinking = cfg["avatars"]["blinking"];
-			}
-			if(cfg.contains("background")) {
-				if(cfg["background"].contains("color")) if(cfg["background"]["color"].size() == 4) {
-					window.setClearColor({ cfg["background"]["color"][0], cfg["background"]["color"][1], cfg["background"]["color"][2], cfg["background"]["color"][3] });
-					transparentWindow=cfg["background"]["color"][3]==0;
-				}
-			}
-		} catch(const std::runtime_error& e) {
-			LOGF_ERRR("Failed to parse config: %s", e.what());
-			return false;
-		}
-		LOG_INFO("Loaded config from: \"" + tPath + "\"");
-		return true;
 	}
 	
 	void onShutdown() override {
