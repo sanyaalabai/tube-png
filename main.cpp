@@ -6,6 +6,7 @@ using namespace Firesteel;
 #include <firesteel/util/geometry.hpp>
 #include <firesteel/util/stbi_global.hpp>
 #include <firesteel/util/imgui_utils.hpp>
+#include <firesteel/util/easing.hpp>
 #include "microphone_sampler.hpp"
 
 enum AffectionState {
@@ -14,6 +15,31 @@ enum AffectionState {
 	AS_ON_FALSE,
 	_SIZE
 };
+using EasingType = float(*)(float);
+float linearInOut(float v) { return v>0.5f?2-v*2:v*2; }
+EasingType easingsInOut[] = {
+	linearInOut,
+	Easing::quadInOut,
+	Easing::cubicInOut,
+	Easing::quartInOut,
+	Easing::sineInOut,
+	Easing::expoInOut,
+	Easing::circInOut,
+	Easing::bounceInOut,
+	Easing::elasticInOut
+};
+static const char* easingInOutToStr(const uint& v) {
+	if(v==0) return "None";
+	if(v==1) return "Linear";
+	if(v==2) return "Quad";
+	if(v==3) return "Cubic";
+	if(v==4) return "Quart";
+	if(v==5) return "Sine";
+	if(v==6) return "Expo";
+	if(v==7) return "Circ";
+	if(v==8) return "Bounce";
+	return "Elastic";
+}
 static const char* affectionStateToStr(const AffectionState& v) {
 	if(v==0) return "none";
 	if(v==1) return "on_true";
@@ -48,6 +74,10 @@ public:
 	glm::vec3 rotationTalkChange{};
 	glm::vec3 positionTalkChange{};
 	glm::vec2 sizeTalkChange{};
+	bool temporal=false;
+	uint selectedEasing=0;
+	uint easingTimeMs=200;
+	uint curEasingTime=0;
 
 	AffectionState showOnTalking=AS_UNAFFECTED;
 	uint blinkingLayerId=0;
@@ -133,6 +163,9 @@ class TubePngApp : public App {
 				scene["layers"][i]["on_talk"]["scale"][0] = layer.sizeTalkChange.x;
 				scene["layers"][i]["on_talk"]["scale"][1] = layer.sizeTalkChange.y;
 			}
+			if(layer.temporal) scene["layers"][i]["on_talk"]["temp"]=layer.temporal;
+			if(layer.selectedEasing!=0) scene["layers"][i]["on_talk"]["ease"]=layer.selectedEasing;
+			if(layer.easingTimeMs!=200) scene["layers"][i]["on_talk"]["ease_time"]=layer.easingTimeMs;
 
 			if(layer.showOnTalking!=AS_UNAFFECTED) scene["layers"][i]["visiblity"]["on_talking"]=affectionStateToStr(layer.showOnTalking);
 			if(layer.showOnBlinking!=AS_UNAFFECTED) {
@@ -140,7 +173,14 @@ class TubePngApp : public App {
 				scene["layers"][i]["visiblity"]["blinking_layer"] = layer.blinkingLayerId;
 			}
 		}
-		for(uint i=0;i<blinkingLayers.size();i++) {
+		uint realBlinkSize=static_cast<uint>(blinkingLayers.size());
+		for(uint i=static_cast<uint>(blinkingLayers.size());i>0;i--) {
+			auto& layer=blinkingLayers[static_cast<size_t>(i-1)];
+			if(layer.blinkCooldown==1000 && layer.blinkTime==200 && layer.offset==0) realBlinkSize--;
+			else break;
+		}
+		if(realBlinkSize>16) realBlinkSize=0;
+		for(uint i=0;i<realBlinkSize;i++) {
 			auto& layer=blinkingLayers[i];
 			if(layer.blinkCooldown==1000 && layer.blinkTime==200 && layer.offset==0) {
 				scene["blinking_layers"][i]=nlohmann::json::object();
@@ -188,13 +228,16 @@ class TubePngApp : public App {
 					if(local.contains("scale")) if(local["scale"].size() == 2)
 						layer.size = { local["scale"][0], local["scale"][1] };
 
-					if (local.contains("on_talk")) {
+					if(local.contains("on_talk")) {
 						if(local["on_talk"].contains("position")) if (local["on_talk"]["position"].size() == 3)
 							layer.positionTalkChange = { local["on_talk"]["position"][0], local["on_talk"]["position"][1], local["on_talk"]["position"][2] };
 						if(local["on_talk"].contains("rotation")) if(local["on_talk"]["rotation"].size() == 3)
 							layer.rotationTalkChange = { local["on_talk"]["rotation"][0], local["on_talk"]["rotation"][1], local["on_talk"]["rotation"][2] };
 						if(local["on_talk"].contains("scale")) if(local["on_talk"]["scale"].size() == 2)
 							layer.sizeTalkChange = { local["on_talk"]["scale"][0], local["on_talk"]["scale"][1] };
+						if(local["on_talk"].contains("ease")) layer.selectedEasing=local["on_talk"]["ease"];
+						if(local["on_talk"].contains("ease_talk")) layer.easingTimeMs=local["on_talk"]["ease_talk"];
+						if(local["on_talk"].contains("temp")) layer.temporal=local["on_talk"]["temp"];
 					}
 
 					if(local.contains("visiblity")) {
@@ -354,9 +397,28 @@ class TubePngApp : public App {
 				if(layer.showOnBlinking==AS_ON_FALSE && blinkingLayersCur[layer.blinkingLayerId]) continue;
 			}
 
-			spriteQuad.transform.position = layer.position + (talking?layer.positionTalkChange:glm::vec3{});
-			spriteQuad.transform.rotation = layer.rotation + (talking?layer.rotationTalkChange:glm::vec3{});
-			spriteQuad.transform.size = glm::vec3(layer.size, 1) + (talking?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
+			if(layer.selectedEasing==0 || layer.easingTimeMs<=0) {
+				spriteQuad.transform.position = layer.position + (talking?layer.positionTalkChange:glm::vec3{});
+				spriteQuad.transform.rotation = layer.rotation + (talking?layer.rotationTalkChange:glm::vec3{});
+				spriteQuad.transform.size = glm::vec3(layer.size, 1) + (talking?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
+			} else if(layer.temporal) {
+				if(layer.curEasingTime<layer.easingTimeMs && talking) {
+					auto& ease=easingsInOut[layer.selectedEasing-1];
+					float apply=ease(linearInOut(static_cast<float>(layer.curEasingTime)/layer.easingTimeMs));
+					spriteQuad.transform.position = layer.position + layer.positionTalkChange*apply;
+					spriteQuad.transform.rotation = layer.rotation + layer.rotationTalkChange*apply;
+					spriteQuad.transform.size = glm::vec3(layer.size + layer.sizeTalkChange*apply, 1);
+					layer.curEasingTime++;
+				} else if(!talking) layer.curEasingTime=0;
+			} else {
+				auto& ease=easingsInOut[layer.selectedEasing-1];
+				float apply=ease(static_cast<float>(layer.curEasingTime)/layer.easingTimeMs);
+				spriteQuad.transform.position = layer.position + layer.positionTalkChange*apply;
+				spriteQuad.transform.rotation = layer.rotation + layer.rotationTalkChange*apply;
+				spriteQuad.transform.size = glm::vec3(layer.size + layer.sizeTalkChange*apply, 1);
+				if(layer.curEasingTime<layer.easingTimeMs && talking) layer.curEasingTime++;
+				else if(layer.curEasingTime>0 && !talking) layer.curEasingTime--;
+			}
 			layer.texture.bind();
 			shader->setInt("material.diffuse0", 0);
 			shader->setVec3("material.diffuse", glm::vec3(1));
@@ -506,11 +568,16 @@ class TubePngApp : public App {
 				if(showAllRotationDirs) ImGui::DragFloat3("Rotation", &layer.rotation);
 				else ImGui::DragFloat("Rotation", &layer.rotation.z);
 				ImGui::DragFloat2("Scale", &layer.size);
+
 				ImGui::Text("Voice alteration"); ImGui::SameLine(); ImGui::Separator();
 				ImGui::DragFloat3("Position delta", &layer.positionTalkChange);
 				if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta", &layer.rotationTalkChange);
 				else ImGui::DragFloat("Rotation delta", &layer.rotationTalkChange.z);
 				ImGui::DragFloat2("Scale delta", &layer.sizeTalkChange);
+				ImGui::SliderUInt("Easing", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
+				ImGui::SliderUInt("Easing time", &layer.easingTimeMs, 0, 10000);
+				ImGui::Checkbox("Temporal", &layer.temporal);
+
 				ImGui::Text("Visibility events"); ImGui::SameLine(); ImGui::Separator();
 				ImGui::SliderEnum<AffectionState>("Show on talking", &layer.showOnTalking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
 				ImGui::SliderEnum<AffectionState>("Show on blinking", &layer.showOnBlinking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
@@ -527,7 +594,7 @@ class TubePngApp : public App {
 					if(changed&&calcBlinking) for(uint i=0;i<blinkingLayers.size();i++) blinkingLayers[i].current=blinkingLayers[i].offset;
 				}
 			} else {
-				ImGui::Text("No Layer selected");
+				ImGui::AlignedText(ImGui::TextAligment_Center, "No Layer selected");
 				selectedSpriteId = 0;
 				haveAnyLayerSelected = false;
 			}
