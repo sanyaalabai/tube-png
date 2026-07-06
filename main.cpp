@@ -169,10 +169,10 @@ class TubePngApp : public App {
 			if(layer.selectedEasing!=0) scene["layers"][i]["on_talk"]["ease"]=layer.selectedEasing;
 			if(layer.easingTimeMs!=200) scene["layers"][i]["on_talk"]["ease_time"]=layer.easingTimeMs;
 
-			if(layer.showOnTalking!=AS_UNAFFECTED) scene["layers"][i]["visiblity"]["on_talking"]=affectionStateToStr(layer.showOnTalking);
+			if(layer.showOnTalking!=AS_UNAFFECTED) scene["layers"][i]["visibility"]["on_talking"]=affectionStateToStr(layer.showOnTalking);
 			if(layer.showOnBlinking!=AS_UNAFFECTED) {
-				scene["layers"][i]["visiblity"]["on_blinking"] = affectionStateToStr(layer.showOnBlinking);
-				scene["layers"][i]["visiblity"]["blinking_layer"] = layer.blinkingLayerId;
+				scene["layers"][i]["visibility"]["on_blinking"] = affectionStateToStr(layer.showOnBlinking);
+				scene["layers"][i]["visibility"]["blinking_layer"] = layer.blinkingLayerId;
 			}
 		}
 		uint realBlinkSize=static_cast<uint>(blinkingLayers.size());
@@ -242,10 +242,10 @@ class TubePngApp : public App {
 						if(local["on_talk"].contains("temp")) layer.temporal=local["on_talk"]["temp"];
 					}
 
-					if(local.contains("visiblity")) {
-						if(local.contains("on_talking")) layer.showOnTalking = strToAffectionState(local["on_talking"]);
-						if(local.contains("on_blinking")) layer.showOnBlinking = strToAffectionState(local["on_blinking"]);
-						if(local.contains("blinking_layer")) layer.blinkingLayerId = local["blinking_layer"];
+					if(local.contains("visibility")) {
+						if(local["visibility"].contains("on_talking")) layer.showOnTalking = strToAffectionState(local["visibility"]["on_talking"]);
+						if(local["visibility"].contains("on_blinking")) layer.showOnBlinking = strToAffectionState(local["visibility"]["on_blinking"]);
+						if(local["visibility"].contains("blinking_layer")) layer.blinkingLayerId = local["visibility"]["blinking_layer"];
 					}
 					layers.emplace_back(layer);
 				}
