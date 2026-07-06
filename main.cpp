@@ -1,3 +1,4 @@
+#define FS_NO_COMPONENTS
 #include <firesteel/firesteel.hpp>
 using namespace Firesteel;
 #include <firesteel/input/keyboard.hpp>
