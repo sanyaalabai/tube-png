@@ -8,6 +8,7 @@ Overcomplicated and cool program for PNGtubing
 - Configurable blinking (16 independent groups!)
 - Support for PNG, JPG formats
 - Simple animation support on talking
+- F1 to hide UI
 
 ## Core
 This application is written in C++, based on [Firesteel](https://github.com/xanytka-devs/firesteel) framework. Also this app uses [aubio](https://github.com/aubio/aubio) and [PortAudio](https://github.com/PortAudio/portaudio).

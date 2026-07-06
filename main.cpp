@@ -104,6 +104,7 @@ Entity spriteQuad{};
 std::shared_ptr<Shader> shader;
 Camera camera{glm::vec3(0), glm::vec3(0, 0, -90)};
 
+bool hideImGui=false;
 bool layerInspectorWindowOpen=false;
 bool configOpen=false;
 
@@ -353,6 +354,8 @@ class TubePngApp : public App {
 	}
 	
 	void onUpdate() override {
+		if(Keyboard::keyDown(KeyCode::F1)) hideImGui=!hideImGui;
+
 		camera.aspect = window.aspect();
 		glm::mat4 projection = camera.getProjection(),
 			view = camera.getView();
@@ -433,6 +436,7 @@ class TubePngApp : public App {
 		drawUI();
 	}
 	void drawUI() {
+		if(hideImGui) return;
 		ImGui::Begin("Avatar");
 		ImGui::BeginDisabled();
 		ImGui::InputText("Path##save_avatar_path", &avatarPath);
