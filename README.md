@@ -1,4 +1,5 @@
-![Logo](build/app.png)
+<img src="build/app.png" width="96">
+
 # tube.png
 Overcomplicated and cool program for PNGtubing
 
