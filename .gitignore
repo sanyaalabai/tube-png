@@ -27,3 +27,6 @@ build/*
 !build/vorbisenc.dll
 !build/vorbisfile.dll
 !build/sndfile.dll
+!build/app.png
+!build/app.ico
+!build/app.rc

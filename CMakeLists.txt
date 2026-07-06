@@ -9,8 +9,10 @@ add_subdirectory(external/PortAudio)
 add_subdirectory(external)
 
 add_executable(tubepng
+	"build/app.rc"
 	"main.cpp"
 	"microphone_sampler.hpp"
+	"embedded.hpp"
 )
 target_link_libraries(tubepng
 	firesteel

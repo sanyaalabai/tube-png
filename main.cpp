@@ -9,6 +9,7 @@ using namespace Firesteel;
 #include <firesteel/util/imgui_utils.hpp>
 #include <firesteel/util/easing.hpp>
 #include "microphone_sampler.hpp"
+#include "embedded.hpp"
 
 enum AffectionState {
 	AS_UNAFFECTED,
@@ -348,6 +349,7 @@ class TubePngApp : public App {
 			}
 			io.FontDefault=imguiFont;
 		}
+		window.setIconFromMemory(ucDataBlock, ucDataBlockSize);
 	}
 	
 	void onUpdate() override {
