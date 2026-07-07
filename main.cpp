@@ -355,6 +355,14 @@ class TubePngApp : public App {
 	
 	void onUpdate() override {
 		if(Keyboard::keyDown(KeyCode::F1)) hideImGui=!hideImGui;
+		bool ctrl=Keyboard::getKey(KeyCode::LEFT_CONTROL)||Keyboard::getKey(KeyCode::RIGHT_CONTROL);
+		bool shift=Keyboard::getKey(KeyCode::LEFT_SHIFT)||Keyboard::getKey(KeyCode::RIGHT_SHIFT);
+		if(Keyboard::keyDown(KeyCode::S) && ctrl) {
+			if(shift) techSaveAs();
+			else techSave();
+		}
+		if(Keyboard::keyDown(KeyCode::O) && ctrl) techLoad();
+		if(Keyboard::keyDown(KeyCode::R) && ctrl) techReload();
 
 		camera.aspect = window.aspect();
 		glm::mat4 projection = camera.getProjection(),
@@ -435,38 +443,42 @@ class TubePngApp : public App {
 
 		drawUI();
 	}
+	void techSaveAs() {
+		auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
+		if(r.size() > 0) {
+			if(r[0]=="") return;
+			avatarPath = r[0];
+			saveAvatar(avatarPath);
+		}
+	}
+	void techSave() {
+		if(avatarPath.empty()||!std::filesystem::exists(avatarPath)) techSaveAs();
+		else saveAvatar(avatarPath);
+	}
+	void techLoad() {
+		auto r = OS::fileDialog(false, false, "", &viableAvatarFormats, "Select avatar load location");
+		if(r.size() > 0) {
+			if(r[0]=="") return;
+			avatarPath = r[0];
+			loadAvatar(avatarPath);
+		}
+	}
+	void techReload() {
+		if(avatarPath.empty() || !std::filesystem::exists(avatarPath)) techLoad();
+		else loadAvatar(avatarPath);
+	}
 	void drawUI() {
 		if(hideImGui) return;
 		ImGui::Begin("Avatar");
 		ImGui::BeginDisabled();
 		ImGui::InputText("Path##save_avatar_path", &avatarPath);
 		ImGui::EndDisabled();
-		if (ImGui::Button("Save##save_avatar")) {
-			if(avatarPath.empty()||!std::filesystem::exists(avatarPath)) {
-				auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
-				if (r.size() > 0) {
-					avatarPath = r[0];
-					saveAvatar(avatarPath);
-				}
-			} else saveAvatar(avatarPath);
-		}
+		if(ImGui::Button("Save (Ctrl+S)##save_avatar")) techSave();
 		ImGui::SameLine();
-		if (ImGui::Button("Save as...##save_as_avatar")) {
-			auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
-			if (r.size() > 0) {
-				avatarPath = r[0];
-				saveAvatar(avatarPath);
-			}
-		}
+		if(ImGui::Button("Save as... (Ctrl+Shift+S)##save_as_avatar")) techSaveAs();
+		if(ImGui::Button("Load (Ctrl+O)##load_avatar")) techLoad();
 		ImGui::SameLine();
-		if (ImGui::Button("Load##load_avatar")) {
-			auto r = OS::fileDialog(false, false, "", &viableAvatarFormats, "Select avatar load location");
-			if (r.size() > 0) {
-				avatarPath = r[0];
-				loadAvatar(avatarPath);
-			}
-		}
-		ImGui::SameLine();
+		if(ImGui::Button("Reload (Ctrl+R)##reload_avatar")) techReload();
 		if(ImGui::Button("Options")) configOpen=true;
 		if(ImGui::CollapsingHeader("Layers")) {
 			for (uint i = 0; i < layers.size(); i++) {
