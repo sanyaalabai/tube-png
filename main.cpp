@@ -623,5 +623,5 @@ class TubePngApp : public App {
 };
 
 int main() {
-	return TubePngApp{}.start("tube.png", 800, 600, WS_NORMAL, WFT_RGB_TRANSPARENT);
+	return TubePngApp{}.start("tube.png", 800, 600, WS_NORMAL, WFT_SRGB_TRANSPARENT);
 }
