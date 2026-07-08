@@ -73,6 +73,7 @@ public:
 	glm::vec3 rotation{};
 	glm::vec2 size{1};
 
+	bool talkChangeEnabled=false;
 	glm::vec3 rotationTalkChange{};
 	glm::vec3 positionTalkChange{};
 	glm::vec2 sizeTalkChange{};
@@ -476,10 +477,10 @@ class TubePngApp : public App {
 				if(layer.showOnBlinking==AS_ON_FALSE && blinkingLayersCur[layer.blinkingLayerId]) continue;
 			}
 
-			if(layer.selectedEasing==0 || layer.easingTimeMs<=0) {
-				spriteQuad.transform.position = layer.position + (talking?layer.positionTalkChange:glm::vec3{});
-				spriteQuad.transform.rotation = layer.rotation + (talking?layer.rotationTalkChange:glm::vec3{});
-				spriteQuad.transform.size = glm::vec3(layer.size, 1) + (talking?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
+			if(layer.selectedEasing==0 || layer.easingTimeMs<=0 || layer.talkChangeEnabled) {
+				spriteQuad.transform.position = layer.position + ((talking&&!layer.talkChangeEnabled)?layer.positionTalkChange:glm::vec3{});
+				spriteQuad.transform.rotation = layer.rotation + ((talking&&!layer.talkChangeEnabled)?layer.rotationTalkChange:glm::vec3{});
+				spriteQuad.transform.size = glm::vec3(layer.size, 1) + ((talking&&!layer.talkChangeEnabled)?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
 			} else if(layer.temporal) {
 				if(layer.curEasingTime<layer.easingTimeMs && talking) {
 					auto& ease=easingsInOut[layer.selectedEasing-1];
@@ -585,7 +586,7 @@ class TubePngApp : public App {
 				if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
 				ImGui::EndPopup();
 			}
-			ImGui::Text("General"); ImGui::SameLine(); ImGui::Separator();
+			ImGui::Separator(); ImGui::Text("General");
 			ImGui::Checkbox("Show all rotation directions", &showAllRotationDirs);
 			ImGui::Checkbox("Blinking", &calcBlinking);
 			if(ImGui::Checkbox("Transparent background", &transparentWindow)) {
@@ -595,7 +596,7 @@ class TubePngApp : public App {
 				glm::vec3 bgc = window.getClearColor();
 				if(ImGui::ColorEdit3("Background", &bgc)) window.setClearColor({ bgc, 1 });
 			}
-			ImGui::Text("Microphone"); ImGui::SameLine(); ImGui::Separator();
+			ImGui::Separator(); ImGui::Text("Microphone");
 			ImGui::Text(Log::formatStr("%s", AudioIO::reciever.name).c_str());
 			ImGui::SameLine();
 			if(ImGui::Button((AudioIO::reciever.muted?"U##mute_microphone":"M##mute_microphone"))) {
@@ -647,22 +648,24 @@ class TubePngApp : public App {
 						loadLayerTexture(layer);
 					}
 				}
-				ImGui::Text("Transform"); ImGui::SameLine(); ImGui::Separator();
+				ImGui::Separator(); ImGui::Text("Transform");
 				ImGui::DragFloat3("Position", &layer.position);
 				if(showAllRotationDirs) ImGui::DragFloat3("Rotation", &layer.rotation);
 				else ImGui::DragFloat("Rotation", &layer.rotation.z);
 				ImGui::DragFloat2("Scale", &layer.size);
 
-				ImGui::Text("Voice alteration"); ImGui::SameLine(); ImGui::Separator();
-				ImGui::DragFloat3("Position delta", &layer.positionTalkChange);
-				if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta", &layer.rotationTalkChange);
-				else ImGui::DragFloat("Rotation delta", &layer.rotationTalkChange.z);
-				ImGui::DragFloat2("Scale delta", &layer.sizeTalkChange);
-				ImGui::SliderUInt("Easing", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
-				ImGui::SliderUInt("Easing time", &layer.easingTimeMs, 0, 10000);
-				ImGui::Checkbox("Temporal", &layer.temporal);
+				ImGui::Separator(); ImGui::Checkbox("Voice alteration", &layer.talkChangeEnabled);
+				if(layer.talkChangeEnabled) {
+					ImGui::DragFloat3("Position delta", &layer.positionTalkChange);
+					if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta", &layer.rotationTalkChange);
+					else ImGui::DragFloat("Rotation delta", &layer.rotationTalkChange.z);
+					ImGui::DragFloat2("Scale delta", &layer.sizeTalkChange);
+					ImGui::SliderUInt("Easing", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
+					ImGui::SliderUInt("Easing time", &layer.easingTimeMs, 0, 10000);
+					ImGui::Checkbox("Temporal", &layer.temporal);
+				}
 
-				ImGui::Text("Visibility events"); ImGui::SameLine(); ImGui::Separator();
+				ImGui::Separator(); ImGui::Text("Visibility events");
 				ImGui::SliderEnum<AffectionState>("Show on talking", &layer.showOnTalking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
 				ImGui::SliderEnum<AffectionState>("Show on blinking", &layer.showOnBlinking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
 				if(layer.showOnBlinking!=AS_UNAFFECTED) {
@@ -670,7 +673,7 @@ class TubePngApp : public App {
 					ImGui::SliderUInt("Blinking layer", &layer.blinkingLayerId, 0, 16);
 					BlinkingLayer& blayer=blinkingLayers[layer.blinkingLayerId];
 
-					ImGui::Text("Blinking layer config"); ImGui::SameLine(); ImGui::Separator();
+					ImGui::Separator(); ImGui::Text("Blinking layer config");
 					bool changed=ImGui::SliderUInt("Cooldown", &blayer.blinkCooldown, 0, 10000);
 					changed=ImGui::SliderUInt("Time", &blayer.blinkTime, 0, 10000)||changed;
 					changed=ImGui::SliderUInt("Offset", &blayer.offset, 0, 10000)||changed;
