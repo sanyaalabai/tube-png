@@ -73,7 +73,6 @@ public:
 	glm::vec3 rotation{};
 	glm::vec2 size{1};
 
-	bool talkChangeEnabled=false;
 	glm::vec3 rotationTalkChange{};
 	glm::vec3 positionTalkChange{};
 	glm::vec2 sizeTalkChange{};
@@ -81,6 +80,12 @@ public:
 	uint selectedEasing=0;
 	uint easingTimeMs=200;
 	uint curEasingTime=0;
+
+	bool idleEnabled=false;
+	glm::vec3 rotationIdleChange{};
+	glm::vec3 positionIdleChange{};
+	glm::vec2 sizeIdleChange{};
+	uint selectedIdleEasing=0;
 
 	AffectionState showOnTalking=AS_UNAFFECTED;
 	uint blinkingLayerId=0;
@@ -167,9 +172,26 @@ class TubePngApp : public App {
 				scene["layers"][i]["on_talk"]["scale"][0] = layer.sizeTalkChange.x;
 				scene["layers"][i]["on_talk"]["scale"][1] = layer.sizeTalkChange.y;
 			}
-			if(layer.temporal) scene["layers"][i]["on_talk"]["temp"]=layer.temporal;
+			if(layer.temporal) scene["layers"][i]["on_talk"]["temp"]=true;
 			if(layer.selectedEasing!=0) scene["layers"][i]["on_talk"]["ease"]=layer.selectedEasing;
 			if(layer.easingTimeMs!=200) scene["layers"][i]["on_talk"]["ease_time"]=layer.easingTimeMs;
+
+			if(layer.idleEnabled) scene["layers"][i]["idle"]["enabled"]=true;
+			if(layer.positionIdleChange!=glm::vec3(0)) {
+				scene["layers"][i]["idle"]["position"][0] = layer.positionIdleChange.x;
+				scene["layers"][i]["idle"]["position"][1] = layer.positionIdleChange.y;
+				scene["layers"][i]["idle"]["position"][2] = layer.positionIdleChange.z;
+			}
+			if(layer.rotationIdleChange!=glm::vec3(0)) {
+				scene["layers"][i]["idle"]["rotation"][0] = layer.rotationIdleChange.x;
+				scene["layers"][i]["idle"]["rotation"][1] = layer.rotationIdleChange.y;
+				scene["layers"][i]["idle"]["rotation"][2] = layer.rotationIdleChange.z;
+			}
+			if(layer.sizeIdleChange!=glm::vec2(0)) {
+				scene["layers"][i]["idle"]["scale"][0] = layer.sizeIdleChange.x;
+				scene["layers"][i]["idle"]["scale"][1] = layer.sizeIdleChange.y;
+			}
+			if(layer.selectedIdleEasing!=0) scene["layers"][i]["idle"]["ease"] = layer.selectedIdleEasing;
 
 			if(layer.showOnTalking!=AS_UNAFFECTED) scene["layers"][i]["visibility"]["on_talking"]=affectionStateToStr(layer.showOnTalking);
 			if(layer.showOnBlinking!=AS_UNAFFECTED) {
@@ -242,6 +264,17 @@ class TubePngApp : public App {
 						if(local["on_talk"].contains("ease")) layer.selectedEasing=local["on_talk"]["ease"];
 						if(local["on_talk"].contains("ease_talk")) layer.easingTimeMs=local["on_talk"]["ease_talk"];
 						if(local["on_talk"].contains("temp")) layer.temporal=local["on_talk"]["temp"];
+					}
+
+					if(local.contains("idle")) {
+						if(local["idle"].contains("enabled")) layer.idleEnabled=local["idle"]["enabled"];
+						if(local["idle"].contains("position")) if(local["idle"]["position"].size() == 3)
+							layer.positionIdleChange = { local["idle"]["position"][0], local["idle"]["position"][1], local["idle"]["position"][2] };
+						if(local["idle"].contains("rotation")) if(local["idle"]["rotation"].size() == 3)
+							layer.rotationIdleChange = { local["idle"]["rotation"][0], local["idle"]["rotation"][1], local["idle"]["rotation"][2] };
+						if(local["idle"].contains("scale")) if(local["idle"]["scale"].size() == 2)
+							layer.sizeIdleChange = { local["idle"]["scale"][0], local["idle"]["scale"][1] };
+						if(local["idle"].contains("ease")) layer.selectedIdleEasing=local["idle"]["ease"];
 					}
 
 					if(local.contains("visibility")) {
@@ -391,6 +424,7 @@ class TubePngApp : public App {
 		colors[ImGuiCol_Button] = ImVec4(0.10f, 0.35f, 0.32f, 1.00f);
 		colors[ImGuiCol_ButtonHovered] = ImVec4(0.14f, 0.45f, 0.41f, 1.00f);
 		colors[ImGuiCol_ButtonActive] = ImVec4(0.08f, 0.28f, 0.26f, 1.00f);
+		colors[ImGuiCol_CheckboxSelectedBg] = ImVec4(0.12f, 0.12f, 0.14f, 1.00f);
 		colors[ImGuiCol_CheckMark] = ImVec4(0.18f, 0.55f, 0.50f, 1.00f);
 		colors[ImGuiCol_SliderGrab] = ImVec4(0.14f, 0.45f, 0.41f, 1.00f);
 		colors[ImGuiCol_SliderGrabActive] = ImVec4(0.18f, 0.55f, 0.50f, 1.00f);
@@ -398,6 +432,7 @@ class TubePngApp : public App {
 		colors[ImGuiCol_TitleBg] = ImVec4(0.05f, 0.05f, 0.06f, 1.00f);
 		colors[ImGuiCol_TitleBgActive] = ImVec4(0.05f, 0.05f, 0.06f, 1.00f);
 		colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.05f, 0.05f, 0.06f, 1.00f);
+		colors[ImGuiCol_TabSelectedOverline] = ImVec4(0.18f, 0.55f, 0.50f, 1.00f);
 		colors[ImGuiCol_Tab] = ImVec4(0.08f, 0.08f, 0.09f, 1.00f);
 		colors[ImGuiCol_TabHovered] = ImVec4(0.14f, 0.14f, 0.16f, 1.00f);
 		colors[ImGuiCol_TabActive] = ImVec4(0.05f, 0.05f, 0.06f, 1.00f);
@@ -477,10 +512,10 @@ class TubePngApp : public App {
 				if(layer.showOnBlinking==AS_ON_FALSE && blinkingLayersCur[layer.blinkingLayerId]) continue;
 			}
 
-			if(layer.selectedEasing==0 || layer.easingTimeMs<=0 || !layer.talkChangeEnabled) {
-				spriteQuad.transform.position = layer.position + ((talking&&layer.talkChangeEnabled)?layer.positionTalkChange:glm::vec3{});
-				spriteQuad.transform.rotation = layer.rotation + ((talking&&layer.talkChangeEnabled)?layer.rotationTalkChange:glm::vec3{});
-				spriteQuad.transform.size = glm::vec3(layer.size, 1) + ((talking&&layer.talkChangeEnabled)?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
+			if(layer.selectedEasing==0 || layer.easingTimeMs<=0) {
+				spriteQuad.transform.position = layer.position + ((talking)?layer.positionTalkChange:glm::vec3{});
+				spriteQuad.transform.rotation = layer.rotation + ((talking)?layer.rotationTalkChange:glm::vec3{});
+				spriteQuad.transform.size = glm::vec3(layer.size, 1) + ((talking)?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
 			} else if(layer.temporal) {
 				if(layer.curEasingTime<layer.easingTimeMs && talking) {
 					auto& ease=easingsInOut[layer.selectedEasing-1];
@@ -648,37 +683,58 @@ class TubePngApp : public App {
 						loadLayerTexture(layer);
 					}
 				}
-				ImGui::Separator(); ImGui::Text("Transform");
-				ImGui::DragFloat3("Position", &layer.position);
-				if(showAllRotationDirs) ImGui::DragFloat3("Rotation", &layer.rotation);
-				else ImGui::DragFloat("Rotation", &layer.rotation.z);
-				ImGui::DragFloat2("Scale", &layer.size);
+				ImGui::Separator();
+				if(ImGui::TreeNodeEx("Transform", ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_DefaultOpen)) {
+					ImGui::DragFloat3("Position", &layer.position);
+					if(showAllRotationDirs) ImGui::DragFloat3("Rotation", &layer.rotation);
+					else ImGui::DragFloat("Rotation", &layer.rotation.z);
+					ImGui::DragFloat2("Scale", &layer.size);
+				}
 
-				ImGui::Separator(); ImGui::Checkbox("Voice alteration", &layer.talkChangeEnabled);
-				if(layer.talkChangeEnabled) {
-					ImGui::DragFloat3("Position delta", &layer.positionTalkChange);
-					if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta", &layer.rotationTalkChange);
-					else ImGui::DragFloat("Rotation delta", &layer.rotationTalkChange.z);
-					ImGui::DragFloat2("Scale delta", &layer.sizeTalkChange);
-					ImGui::SliderUInt("Easing", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
+				ImGui::Separator();
+				if(ImGui::TreeNodeEx("Voice alteration", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+					ImGui::DragFloat3("Position delta##pos_va", &layer.positionTalkChange);
+					if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta##rot_va", &layer.rotationTalkChange);
+					else ImGui::DragFloat("Rotation delta##rot_va", &layer.rotationTalkChange.z);
+					ImGui::DragFloat2("Scale delta##size_va", &layer.sizeTalkChange);
+					ImGui::SliderUInt("Easing##ease_voice", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
 					ImGui::SliderUInt("Easing time", &layer.easingTimeMs, 0, 10000);
 					ImGui::Checkbox("Temporal", &layer.temporal);
 				}
 
-				ImGui::Separator(); ImGui::Text("Visibility events");
-				ImGui::SliderEnum<AffectionState>("Show on talking", &layer.showOnTalking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
-				ImGui::SliderEnum<AffectionState>("Show on blinking", &layer.showOnBlinking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
-				if(layer.showOnBlinking!=AS_UNAFFECTED) {
-					if(!calcBlinking) ImGui::Text("You have blinking disabled. Changes won't be visible");
-					ImGui::SliderUInt("Blinking layer", &layer.blinkingLayerId, 0, 16);
-					BlinkingLayer& blayer=blinkingLayers[layer.blinkingLayerId];
+				ImGui::Separator();
+				ImGui::TextColored(ImVec4(1,0,0,1), "!");
+				if(ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("This feature is WIP");
+					ImGui::EndTooltip();
+				}
+				ImGui::SameLine();
+				if(ImGui::TreeNodeEx("Idle", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+					ImGui::Checkbox("Enabled##idle_on", &layer.idleEnabled);
+					ImGui::DragFloat3("Position delta##pos_idle", &layer.positionTalkChange);
+					if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta##rot_idle", &layer.rotationTalkChange);
+					else ImGui::DragFloat("Rotation delta##rot_idle", &layer.rotationTalkChange.z);
+					ImGui::DragFloat2("Scale delta##size_idle", &layer.sizeTalkChange);
+					ImGui::SliderUInt("Easing##ease_idle", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
+				}
 
-					ImGui::Separator(); ImGui::Text("Blinking layer config");
-					bool changed=ImGui::SliderUInt("Cooldown", &blayer.blinkCooldown, 0, 10000);
-					changed=ImGui::SliderUInt("Time", &blayer.blinkTime, 0, 10000)||changed;
-					changed=ImGui::SliderUInt("Offset", &blayer.offset, 0, 10000)||changed;
+				ImGui::Separator();
+				if(ImGui::TreeNodeEx("Visibility events", ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_DefaultOpen)) {
+					ImGui::SliderEnum<AffectionState>("Show on talking", &layer.showOnTalking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
+					ImGui::SliderEnum<AffectionState>("Show on blinking", &layer.showOnBlinking, asStrPhysical, AS_UNAFFECTED, AS_ON_FALSE);
+					if(layer.showOnBlinking!=AS_UNAFFECTED) {
+						if(!calcBlinking) ImGui::Text("You have blinking disabled. Changes won't be visible");
+						ImGui::Separator(); ImGui::AlignedText(ImGui::TextAligment_Center, "Blinking layer config");
+						ImGui::DragUInt("ID", &layer.blinkingLayerId, 1, 0, 15);
+						BlinkingLayer& blayer=blinkingLayers[layer.blinkingLayerId];
 
-					if(changed&&calcBlinking) for(uint i=0;i<blinkingLayers.size();i++) blinkingLayers[i].current=blinkingLayers[i].offset;
+						bool changed=ImGui::SliderUInt("Cooldown", &blayer.blinkCooldown, 0, 10000);
+						changed=ImGui::SliderUInt("Time", &blayer.blinkTime, 0, 10000)||changed;
+						changed=ImGui::SliderUInt("Offset", &blayer.offset, 0, 10000)||changed;
+
+						if(changed&&calcBlinking) for(uint i=0;i<blinkingLayers.size();i++) blinkingLayers[i].current=blinkingLayers[i].offset;
+					}
 				}
 			} else {
 				ImGui::AlignedText(ImGui::TextAligment_Center, "No Layer selected");
