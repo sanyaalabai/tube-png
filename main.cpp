@@ -477,10 +477,10 @@ class TubePngApp : public App {
 				if(layer.showOnBlinking==AS_ON_FALSE && blinkingLayersCur[layer.blinkingLayerId]) continue;
 			}
 
-			if(layer.selectedEasing==0 || layer.easingTimeMs<=0 || layer.talkChangeEnabled) {
-				spriteQuad.transform.position = layer.position + ((talking&&!layer.talkChangeEnabled)?layer.positionTalkChange:glm::vec3{});
-				spriteQuad.transform.rotation = layer.rotation + ((talking&&!layer.talkChangeEnabled)?layer.rotationTalkChange:glm::vec3{});
-				spriteQuad.transform.size = glm::vec3(layer.size, 1) + ((talking&&!layer.talkChangeEnabled)?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
+			if(layer.selectedEasing==0 || layer.easingTimeMs<=0 || !layer.talkChangeEnabled) {
+				spriteQuad.transform.position = layer.position + ((talking&&layer.talkChangeEnabled)?layer.positionTalkChange:glm::vec3{});
+				spriteQuad.transform.rotation = layer.rotation + ((talking&&layer.talkChangeEnabled)?layer.rotationTalkChange:glm::vec3{});
+				spriteQuad.transform.size = glm::vec3(layer.size, 1) + ((talking&&layer.talkChangeEnabled)?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
 			} else if(layer.temporal) {
 				if(layer.curEasingTime<layer.easingTimeMs && talking) {
 					auto& ease=easingsInOut[layer.selectedEasing-1];
