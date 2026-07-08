@@ -570,6 +570,7 @@ class TubePngApp : public App {
 	}
 	void drawUI() {
 		if(hideImGui) return;
+		ImGui::SetupDockspace("tubepng");
 		ImGui::Begin("Avatar");
 		ImGui::BeginDisabled();
 		ImGui::InputText("Path##save_avatar_path", &avatarPath);
