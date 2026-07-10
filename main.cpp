@@ -8,6 +8,7 @@ using namespace Firesteel;
 #include <firesteel/util/stbi_global.hpp>
 #include <firesteel/util/imgui_utils.hpp>
 #include <firesteel/util/easing.hpp>
+#include <firesteel/util/random.hpp>
 #include "microphone_sampler.hpp"
 #include "embedded.hpp"
 
@@ -31,15 +32,14 @@ EasingType easingsInOut[] = {
 	Easing::elasticInOut
 };
 static const char* easingInOutToStr(const uint& v) {
-	if(v==0) return "None";
-	if(v==1) return "Linear";
-	if(v==2) return "Quad";
-	if(v==3) return "Cubic";
-	if(v==4) return "Quart";
-	if(v==5) return "Sine";
-	if(v==6) return "Expo";
-	if(v==7) return "Circ";
-	if(v==8) return "Bounce";
+	if(v==0) return "Linear";
+	if(v==1) return "Quad";
+	if(v==2) return "Cubic";
+	if(v==3) return "Quart";
+	if(v==4) return "Sine";
+	if(v==5) return "Expo";
+	if(v==6) return "Circ";
+	if(v==7) return "Bounce";
 	return "Elastic";
 }
 static const char* affectionStateToStr(const AffectionState& v) {
@@ -48,14 +48,19 @@ static const char* affectionStateToStr(const AffectionState& v) {
 	return "on_false";
 }
 const char* affectionStateToGoodStr(AffectionState v) {
-	if(v == 0) return "Unaffected";
-	if(v == 1) return "On True";
+	if(v==0) return "Unaffected";
+	if(v==1) return "On True";
 	return "On False";
 }
 const char* asStrPhysical(AffectionState v) {
-	if(v == 0) return "Unaffected";
-	if(v == 1) return "When open";
+	if(v==0) return "Unaffected";
+	if(v==1) return "When open";
 	return "When closed";
+}
+const char* isStrPhysical(uint v) {
+	if(v==0) return "None";
+	if(v==1) return "Breath";
+	return "Random";
 }
 static AffectionState strToAffectionState(const std::string& v) {
 	if(v=="on_true") return AS_ON_TRUE;
@@ -73,19 +78,26 @@ public:
 	glm::vec3 rotation{};
 	glm::vec2 size{1};
 
-	glm::vec3 rotationTalkChange{};
 	glm::vec3 positionTalkChange{};
+	glm::vec3 rotationTalkChange{};
 	glm::vec2 sizeTalkChange{};
 	bool temporal=false;
-	uint selectedEasing=0;
-	uint easingTimeMs=200;
-	uint curEasingTime=0;
+	uint talkEasing=0;
+	uint easingTalkMs=200;
+	uint curTalkTimer=0;
 
-	bool idleEnabled=false;
-	glm::vec3 rotationIdleChange{};
+	uint idleType=0;
 	glm::vec3 positionIdleChange{};
+	glm::vec3 rotationIdleChange{};
 	glm::vec2 sizeIdleChange{};
-	uint selectedIdleEasing=0;
+	uint idleEasing=0;
+	uint easingIdleMs=1000;
+	uint easingIdleHoldMs=1;
+	uint curIdleTimer=0;
+	glm::vec3 nextIdleTargetPos{};
+	glm::vec3 nextIdleTargetRot{};
+	glm::vec2 nextIdleTargetSize{};
+	int idleBreathState=0;
 
 	AffectionState showOnTalking=AS_UNAFFECTED;
 	uint blinkingLayerId=0;
@@ -112,6 +124,7 @@ Camera camera{glm::vec3(0), glm::vec3(0, 0, -90)};
 
 bool hideImGui=false;
 bool layerInspectorWindowOpen=false;
+bool layersOpen=true;
 bool configOpen=false;
 
 std::string avatarPath="my_avatar.tubepng.json";
@@ -159,44 +172,46 @@ class TubePngApp : public App {
 			}
 
 			if(layer.positionTalkChange!=glm::vec3(0)) {
-				scene["layers"][i]["on_talk"]["position"][0] = layer.positionTalkChange.x;
-				scene["layers"][i]["on_talk"]["position"][1] = layer.positionTalkChange.y;
-				scene["layers"][i]["on_talk"]["position"][2] = layer.positionTalkChange.z;
+				scene["layers"][i]["on_talk"]["position"][0]=layer.positionTalkChange.x;
+				scene["layers"][i]["on_talk"]["position"][1]=layer.positionTalkChange.y;
+				scene["layers"][i]["on_talk"]["position"][2]=layer.positionTalkChange.z;
 			}
 			if(layer.rotationTalkChange!=glm::vec3(0)) {
-				scene["layers"][i]["on_talk"]["rotation"][0] = layer.rotationTalkChange.x;
-				scene["layers"][i]["on_talk"]["rotation"][1] = layer.rotationTalkChange.y;
-				scene["layers"][i]["on_talk"]["rotation"][2] = layer.rotationTalkChange.z;
+				scene["layers"][i]["on_talk"]["rotation"][0]=layer.rotationTalkChange.x;
+				scene["layers"][i]["on_talk"]["rotation"][1]=layer.rotationTalkChange.y;
+				scene["layers"][i]["on_talk"]["rotation"][2]=layer.rotationTalkChange.z;
 			}
 			if(layer.sizeTalkChange!=glm::vec2(0)) {
-				scene["layers"][i]["on_talk"]["scale"][0] = layer.sizeTalkChange.x;
-				scene["layers"][i]["on_talk"]["scale"][1] = layer.sizeTalkChange.y;
+				scene["layers"][i]["on_talk"]["scale"][0]=layer.sizeTalkChange.x;
+				scene["layers"][i]["on_talk"]["scale"][1]=layer.sizeTalkChange.y;
 			}
 			if(layer.temporal) scene["layers"][i]["on_talk"]["temp"]=true;
-			if(layer.selectedEasing!=0) scene["layers"][i]["on_talk"]["ease"]=layer.selectedEasing;
-			if(layer.easingTimeMs!=200) scene["layers"][i]["on_talk"]["ease_time"]=layer.easingTimeMs;
+			if(layer.talkEasing!=0) scene["layers"][i]["on_talk"]["ease"]=layer.talkEasing;
+			if(layer.easingTalkMs!=200) scene["layers"][i]["on_talk"]["ease_time"]=layer.easingTalkMs;
 
-			if(layer.idleEnabled) scene["layers"][i]["idle"]["enabled"]=true;
+			if(layer.idleType!=0) scene["layers"][i]["idle"]["type"]=layer.idleType;
 			if(layer.positionIdleChange!=glm::vec3(0)) {
-				scene["layers"][i]["idle"]["position"][0] = layer.positionIdleChange.x;
-				scene["layers"][i]["idle"]["position"][1] = layer.positionIdleChange.y;
-				scene["layers"][i]["idle"]["position"][2] = layer.positionIdleChange.z;
+				scene["layers"][i]["idle"]["position"][0]=layer.positionIdleChange.x;
+				scene["layers"][i]["idle"]["position"][1]=layer.positionIdleChange.y;
+				scene["layers"][i]["idle"]["position"][2]=layer.positionIdleChange.z;
 			}
 			if(layer.rotationIdleChange!=glm::vec3(0)) {
-				scene["layers"][i]["idle"]["rotation"][0] = layer.rotationIdleChange.x;
-				scene["layers"][i]["idle"]["rotation"][1] = layer.rotationIdleChange.y;
-				scene["layers"][i]["idle"]["rotation"][2] = layer.rotationIdleChange.z;
+				scene["layers"][i]["idle"]["rotation"][0]=layer.rotationIdleChange.x;
+				scene["layers"][i]["idle"]["rotation"][1]=layer.rotationIdleChange.y;
+				scene["layers"][i]["idle"]["rotation"][2]=layer.rotationIdleChange.z;
 			}
 			if(layer.sizeIdleChange!=glm::vec2(0)) {
-				scene["layers"][i]["idle"]["scale"][0] = layer.sizeIdleChange.x;
-				scene["layers"][i]["idle"]["scale"][1] = layer.sizeIdleChange.y;
+				scene["layers"][i]["idle"]["scale"][0]=layer.sizeIdleChange.x;
+				scene["layers"][i]["idle"]["scale"][1]=layer.sizeIdleChange.y;
 			}
-			if(layer.selectedIdleEasing!=0) scene["layers"][i]["idle"]["ease"] = layer.selectedIdleEasing;
+			if(layer.idleEasing!=0) scene["layers"][i]["idle"]["ease"]=layer.idleEasing;
+			if(layer.easingIdleMs!=1000) scene["layers"][i]["idle"]["ease_time"]=layer.easingIdleMs;
+			if(layer.easingIdleHoldMs!=1) scene["layers"][i]["idle"]["hold_time"]=layer.easingIdleHoldMs;
 
 			if(layer.showOnTalking!=AS_UNAFFECTED) scene["layers"][i]["visibility"]["on_talking"]=affectionStateToStr(layer.showOnTalking);
 			if(layer.showOnBlinking!=AS_UNAFFECTED) {
-				scene["layers"][i]["visibility"]["on_blinking"] = affectionStateToStr(layer.showOnBlinking);
-				scene["layers"][i]["visibility"]["blinking_layer"] = layer.blinkingLayerId;
+				scene["layers"][i]["visibility"]["on_blinking"]=affectionStateToStr(layer.showOnBlinking);
+				scene["layers"][i]["visibility"]["blinking_layer"]=layer.blinkingLayerId;
 			}
 		}
 		uint realBlinkSize=static_cast<uint>(blinkingLayers.size());
@@ -261,20 +276,22 @@ class TubePngApp : public App {
 							layer.rotationTalkChange = { local["on_talk"]["rotation"][0], local["on_talk"]["rotation"][1], local["on_talk"]["rotation"][2] };
 						if(local["on_talk"].contains("scale")) if(local["on_talk"]["scale"].size() == 2)
 							layer.sizeTalkChange = { local["on_talk"]["scale"][0], local["on_talk"]["scale"][1] };
-						if(local["on_talk"].contains("ease")) layer.selectedEasing=local["on_talk"]["ease"];
-						if(local["on_talk"].contains("ease_talk")) layer.easingTimeMs=local["on_talk"]["ease_talk"];
+						if(local["on_talk"].contains("ease")) layer.talkEasing=local["on_talk"]["ease"];
+						if(local["on_talk"].contains("ease_talk")) layer.easingTalkMs=local["on_talk"]["ease_talk"];
 						if(local["on_talk"].contains("temp")) layer.temporal=local["on_talk"]["temp"];
 					}
 
 					if(local.contains("idle")) {
-						if(local["idle"].contains("enabled")) layer.idleEnabled=local["idle"]["enabled"];
+						if(local["idle"].contains("type")) layer.idleType=local["idle"]["type"];
 						if(local["idle"].contains("position")) if(local["idle"]["position"].size() == 3)
 							layer.positionIdleChange = { local["idle"]["position"][0], local["idle"]["position"][1], local["idle"]["position"][2] };
 						if(local["idle"].contains("rotation")) if(local["idle"]["rotation"].size() == 3)
 							layer.rotationIdleChange = { local["idle"]["rotation"][0], local["idle"]["rotation"][1], local["idle"]["rotation"][2] };
 						if(local["idle"].contains("scale")) if(local["idle"]["scale"].size() == 2)
 							layer.sizeIdleChange = { local["idle"]["scale"][0], local["idle"]["scale"][1] };
-						if(local["idle"].contains("ease")) layer.selectedIdleEasing=local["idle"]["ease"];
+						if(local["idle"].contains("ease")) layer.idleEasing=local["idle"]["ease"];
+						if(local["idle"].contains("ease_time")) layer.easingIdleMs=local["idle"]["ease_time"];
+						if(local["idle"].contains("hold_time")) layer.easingIdleHoldMs=local["idle"]["hold_time"];
 					}
 
 					if(local.contains("visibility")) {
@@ -512,28 +529,75 @@ class TubePngApp : public App {
 				if(layer.showOnBlinking==AS_ON_FALSE && blinkingLayersCur[layer.blinkingLayerId]) continue;
 			}
 
-			if(layer.selectedEasing==0 || layer.easingTimeMs<=0) {
+			if(layer.easingTalkMs<=0) {
 				spriteQuad.transform.position = layer.position + ((talking)?layer.positionTalkChange:glm::vec3{});
 				spriteQuad.transform.rotation = layer.rotation + ((talking)?layer.rotationTalkChange:glm::vec3{});
 				spriteQuad.transform.size = glm::vec3(layer.size, 1) + ((talking)?glm::vec3(layer.sizeTalkChange,0):glm::vec3{});
 			} else if(layer.temporal) {
-				if(layer.curEasingTime<layer.easingTimeMs && talking) {
-					auto& ease=easingsInOut[layer.selectedEasing-1];
-					float apply=ease(linearInOut(static_cast<float>(layer.curEasingTime)/layer.easingTimeMs));
+				if(layer.curTalkTimer<layer.easingTalkMs && talking) {
+					auto& ease=easingsInOut[layer.talkEasing];
+					float apply=ease(linearInOut(static_cast<float>(layer.curTalkTimer)/layer.easingTalkMs));
 					spriteQuad.transform.position = layer.position + layer.positionTalkChange*apply;
 					spriteQuad.transform.rotation = layer.rotation + layer.rotationTalkChange*apply;
 					spriteQuad.transform.size = glm::vec3(layer.size + layer.sizeTalkChange*apply, 1);
-					layer.curEasingTime++;
-				} else if(!talking) layer.curEasingTime=0;
+					layer.curTalkTimer++;
+				} else if(!talking) layer.curTalkTimer=0;
 			} else {
-				auto& ease=easingsInOut[layer.selectedEasing-1];
-				float apply=ease(static_cast<float>(layer.curEasingTime)/layer.easingTimeMs);
+				auto& ease=easingsInOut[layer.talkEasing];
+				float apply=ease(static_cast<float>(layer.curTalkTimer)/layer.easingTalkMs);
 				spriteQuad.transform.position = layer.position + layer.positionTalkChange*apply;
 				spriteQuad.transform.rotation = layer.rotation + layer.rotationTalkChange*apply;
 				spriteQuad.transform.size = glm::vec3(layer.size + layer.sizeTalkChange*apply, 1);
-				if(layer.curEasingTime<layer.easingTimeMs && talking) layer.curEasingTime++;
-				else if(layer.curEasingTime>0 && !talking) layer.curEasingTime--;
+				if(layer.curTalkTimer<layer.easingTalkMs && talking) layer.curTalkTimer++;
+				else if(layer.curTalkTimer>0 && !talking) layer.curTalkTimer--;
 			}
+
+			if(layer.idleType==1) {
+				auto& ease=easingsInOut[layer.idleEasing];
+				float apply=ease(min(static_cast<float>(layer.curIdleTimer)/layer.easingIdleMs,1.f));
+				spriteQuad.transform.position += layer.positionIdleChange*apply;
+				spriteQuad.transform.rotation += layer.rotationIdleChange*apply;
+				spriteQuad.transform.size += glm::vec3(layer.sizeIdleChange*apply, 1);
+				if(layer.curIdleTimer<layer.easingTalkMs && layer.idleBreathState==0) {
+					layer.curIdleTimer++;
+					if(layer.curIdleTimer==(layer.easingTalkMs-1)) layer.idleBreathState=1;
+				} else if(layer.idleBreathState==1) {
+					layer.curIdleTimer++;
+					if(layer.curIdleTimer==(layer.easingTalkMs+layer.easingIdleHoldMs-1)) layer.idleBreathState=2;
+				} else if(layer.curIdleTimer>0 && layer.idleBreathState==2) {
+					layer.curIdleTimer--;
+					if(layer.curIdleTimer<=1) layer.idleBreathState=0;
+				}
+			} else if(layer.idleType==2) {
+				auto& ease=easingsInOut[layer.idleEasing];
+				float apply=ease(min(static_cast<float>(layer.curIdleTimer)/layer.easingIdleMs,1.f));
+				spriteQuad.transform.position += layer.nextIdleTargetPos*apply;
+				spriteQuad.transform.rotation += layer.nextIdleTargetRot*apply;
+				spriteQuad.transform.size += glm::vec3(layer.nextIdleTargetSize*apply, 1);
+				if(layer.curIdleTimer<layer.easingTalkMs && layer.idleBreathState==0) {
+					if(layer.curIdleTimer<=1) {
+						layer.nextIdleTargetPos.x=Random::get(-abs(layer.positionIdleChange.x), abs(layer.positionIdleChange.x));
+						layer.nextIdleTargetPos.y=Random::get(-abs(layer.positionIdleChange.y), abs(layer.positionIdleChange.y));
+						layer.nextIdleTargetPos.z=Random::get(-abs(layer.positionIdleChange.z), abs(layer.positionIdleChange.z));
+
+						layer.nextIdleTargetRot.x=Random::get(-abs(layer.rotationIdleChange.x), abs(layer.rotationIdleChange.x));
+						layer.nextIdleTargetRot.y=Random::get(-abs(layer.rotationIdleChange.y), abs(layer.rotationIdleChange.y));
+						layer.nextIdleTargetRot.z=Random::get(-abs(layer.rotationIdleChange.z), abs(layer.rotationIdleChange.z));
+
+						layer.nextIdleTargetSize.x=Random::get(-abs(layer.sizeIdleChange.x), abs(layer.sizeIdleChange.x));
+						layer.nextIdleTargetSize.y=Random::get(-abs(layer.sizeIdleChange.y), abs(layer.sizeIdleChange.y));
+					}
+					layer.curIdleTimer++;
+					if(layer.curIdleTimer==(layer.easingTalkMs-1)) layer.idleBreathState=1;
+				} else if(layer.idleBreathState==1) {
+					layer.curIdleTimer++;
+					if(layer.curIdleTimer==(layer.easingTalkMs+layer.easingIdleHoldMs-1)) layer.idleBreathState=2;
+				} else if(layer.curIdleTimer>0 && layer.idleBreathState==2) {
+					layer.curIdleTimer--;
+					if(layer.curIdleTimer<=1) layer.idleBreathState=0;
+				}
+			}
+
 			layer.texture.bind();
 			shader->setInt("material.diffuse0", 0);
 			shader->setVec3("material.diffuse", glm::vec3(1));
@@ -582,17 +646,8 @@ class TubePngApp : public App {
 		ImGui::SameLine();
 		if(ImGui::Button("Reload (Ctrl+R)##reload_avatar")) techReload();
 		if(ImGui::Button("Options")) configOpen=true;
-		if(ImGui::CollapsingHeader("Layers")) {
-			for (uint i = 0; i < layers.size(); i++) {
-				AvatarLayer& layer = layers[i];
-				if(ImGui::MenuItem((layer.name+"##layer_"+std::to_string(i)).c_str(), NULL, selectedSpriteId==i && haveAnyLayerSelected)) {
-					selectedSpriteId = i;
-					haveAnyLayerSelected = true;
-					layerInspectorWindowOpen = true;
-				}
-			}
-			if(ImGui::Button("+ Add layer")) layers.push_back({ true, "Layer " + std::to_string(layers.size()) });
-		}
+		ImGui::SameLine();
+		if(ImGui::Button("Layers")) layersOpen=true;
 		ImGui::End();
 		if(configOpen) {
 			ImGui::Begin("Options", &configOpen);
@@ -660,6 +715,19 @@ class TubePngApp : public App {
 
 			ImGui::End();
 		}
+		if(layersOpen) {
+			ImGui::Begin("Layers", &layersOpen);
+			for(uint i=0;i<layers.size();i++) {
+				AvatarLayer& layer = layers[i];
+				if(ImGui::MenuItem((layer.name+"##layer_"+std::to_string(i)).c_str(), NULL, selectedSpriteId==i && haveAnyLayerSelected)) {
+					selectedSpriteId = i;
+					haveAnyLayerSelected = true;
+					layerInspectorWindowOpen = true;
+				}
+			}
+			if(ImGui::Button("+ Add layer")) layers.push_back({ true, "Layer " + std::to_string(layers.size()) });
+			ImGui::End();
+		}
 		if(layerInspectorWindowOpen) {
 			ImGui::Begin("Sprite Layer", &layerInspectorWindowOpen);
 			if(layers.size() > 0 && selectedSpriteId < layers.size() && haveAnyLayerSelected) {
@@ -694,30 +762,37 @@ class TubePngApp : public App {
 
 				ImGui::Separator();
 				if(ImGui::TreeNodeEx("Voice alteration", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+					if(ImGui::Button("Sync Timers##va_reset")) {
+						for(size_t i=0;i<layers.size();i++) layers[i].curTalkTimer=0;
+					}
 					ImGui::DragFloat3("Position delta##pos_va", &layer.positionTalkChange);
 					if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta##rot_va", &layer.rotationTalkChange);
 					else ImGui::DragFloat("Rotation delta##rot_va", &layer.rotationTalkChange.z);
 					ImGui::DragFloat2("Scale delta##size_va", &layer.sizeTalkChange);
-					ImGui::SliderUInt("Easing##ease_voice", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
-					ImGui::SliderUInt("Easing time", &layer.easingTimeMs, 0, 10000);
+					ImGui::SliderUInt("Easing##ease_voice", &layer.talkEasing, 0, 8, easingInOutToStr(layer.talkEasing));
+					if(layer.talkEasing!=0) ImGui::DragUInt("Easing time", &layer.easingTalkMs, 1);
 					ImGui::Checkbox("Temporal", &layer.temporal);
 				}
 
 				ImGui::Separator();
-				ImGui::TextColored(ImVec4(1,0,0,1), "!");
-				if(ImGui::IsItemHovered()) {
-					ImGui::BeginTooltip();
-					ImGui::Text("This feature is WIP");
-					ImGui::EndTooltip();
-				}
-				ImGui::SameLine();
 				if(ImGui::TreeNodeEx("Idle", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
-					ImGui::Checkbox("Enabled##idle_on", &layer.idleEnabled);
-					ImGui::DragFloat3("Position delta##pos_idle", &layer.positionTalkChange);
-					if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta##rot_idle", &layer.rotationTalkChange);
-					else ImGui::DragFloat("Rotation delta##rot_idle", &layer.rotationTalkChange.z);
-					ImGui::DragFloat2("Scale delta##size_idle", &layer.sizeTalkChange);
-					ImGui::SliderUInt("Easing##ease_idle", &layer.selectedEasing, 0, 9, easingInOutToStr(layer.selectedEasing));
+					ImGui::SliderUInt("Type##idle_type", &layer.idleType, 0, 2, isStrPhysical(layer.idleType));
+					if(layer.idleType!=0) {
+						if(ImGui::Button("Sync Timers##idle_reset")) {
+							for(size_t i=0;i<layers.size();i++) {
+								layers[i].curIdleTimer=0;
+								layers[i].idleBreathState=0;
+							}
+						}
+						ImGui::DragFloat3("Position delta##pos_idle", &layer.positionIdleChange);
+						if(showAllRotationDirs) ImGui::DragFloat3("Rotation delta##rot_idle", &layer.rotationIdleChange);
+						else ImGui::DragFloat("Rotation delta##rot_idle", &layer.rotationIdleChange.z);
+						ImGui::DragFloat2("Scale delta##size_idle", &layer.sizeIdleChange);
+						ImGui::SliderUInt("Easing##ease_idle", &layer.idleEasing, 0, 8, easingInOutToStr(layer.idleEasing));
+						uint easeReal=layer.easingIdleMs/1000;
+						if(ImGui::DragUInt("Easing time##idle_timer", &easeReal, 1, 1)) layer.easingIdleMs=easeReal*1000;
+						ImGui::DragUInt("Easing hold time##idle_timer_hold", &layer.easingIdleHoldMs, 1, 1);
+					}
 				}
 
 				ImGui::Separator();
