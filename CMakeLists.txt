@@ -13,6 +13,8 @@ add_executable(tubepng
 	"main.cpp"
 	"microphone_sampler.hpp"
 	"embedded.hpp"
+	"external/ImGuizmo/ImGuizmo.h"
+	"external/ImGuizmo/ImGuizmo.cpp"
 )
 target_link_libraries(tubepng
 	firesteel

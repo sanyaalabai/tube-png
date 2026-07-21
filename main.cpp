@@ -1,4 +1,3 @@
-#define FS_NO_COMPONENTS
 #include <firesteel/firesteel.hpp>
 using namespace Firesteel;
 #include <firesteel/input/keyboard.hpp>
@@ -11,6 +10,7 @@ using namespace Firesteel;
 #include <firesteel/util/random.hpp>
 #include "microphone_sampler.hpp"
 #include "embedded.hpp"
+#include "external/ImGuizmo/ImGuizmo.h"
 
 enum AffectionState {
 	AS_UNAFFECTED,
@@ -126,6 +126,8 @@ bool hideImGui=false;
 bool layerInspectorWindowOpen=false;
 bool layersOpen=true;
 bool configOpen=false;
+ImGuizmo::MODE currentGizmoMode=ImGuizmo::WORLD;
+ImGuizmo::OPERATION currentGizmoOperation=ImGuizmo::TRANSLATE;
 
 std::string avatarPath="my_avatar.tubepng.json";
 std::vector<std::string> viableAvatarFormats = {
@@ -516,6 +518,10 @@ class TubePngApp : public App {
 			if(ctrl) moveVec*=2;
 			if(shift) moveVec/=2;
 			layers[selectedSpriteId].position+=moveVec*DeltaTime::get();
+
+			if(Keyboard::keyDown(KeyCode::E)) currentGizmoOperation = ImGuizmo::TRANSLATE;
+			if(Keyboard::keyDown(KeyCode::R)) currentGizmoOperation = ImGuizmo::ROTATE;
+			if(Keyboard::keyDown(KeyCode::T)) currentGizmoOperation = ImGuizmo::SCALE;
 		}
 
 		for(uint i=0;i<layers.size();i++) {
@@ -606,7 +612,7 @@ class TubePngApp : public App {
 			spriteQuad.model.meshes[0].draw(NULL, true);
 		}
 
-		drawUI();
+		drawUI(projection, view);
 	}
 	void techSaveAs() {
 		auto r = OS::fileDialog(true, false, "", &viableAvatarFormats, "Select avatar save location");
@@ -632,9 +638,39 @@ class TubePngApp : public App {
 		if(avatarPath.empty() || !std::filesystem::exists(avatarPath)) techLoad();
 		else loadAvatar(avatarPath);
 	}
-	void drawUI() {
+	void drawUI(glm::mat4 projection, glm::mat4 view) {
 		if(hideImGui) return;
-		ImGui::SetupDockspace("tubepng");
+		ImGui::SetupDockspace("tubepng", false, false);
+		if(haveAnyLayerSelected) {
+			glm::mat4 curModel = Transform(layers[selectedSpriteId].position,layers[selectedSpriteId].rotation, glm::vec3(layers[selectedSpriteId].size, 1)).getMatrix();
+			ImGuizmo::SetOwnerWindowName("tubepng");
+			ImGuizmo::BeginFrame();
+
+			// imguizmo
+			ImGuizmo::SetOrthographic(false);
+			ImGuizmo::AllowAxisFlip(false);
+			ImGuizmo::SetDrawlist();
+			// ImGuizmo::SetRect(windowPos.x, windowPos.y, windowSize.x, windowSize.y);
+			ImGuizmo::SetRect(
+				ImGui::GetWindowPos().x,
+				ImGui::GetWindowPos().y,
+				window.getWidth(),
+				window.getHeight()
+			);
+
+			// Manipulate the model matrix
+			ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(projection),
+				currentGizmoOperation, currentGizmoMode, glm::value_ptr(curModel));
+
+			float transl[3] = { 0,0,0 };
+			float rotat[3] = { 0,0,0 };
+			float scalel[3] = { 0,0,0 };
+			ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(curModel), transl, rotat, scalel);
+			layers[selectedSpriteId].position = glm::make_vec3(transl);
+			layers[selectedSpriteId].rotation = glm::make_vec3(rotat);
+			layers[selectedSpriteId].size = glm::make_vec3(scalel);
+		}
+		ImGui::End();
 		ImGui::Begin("Avatar");
 		ImGui::BeginDisabled();
 		ImGui::InputText("Path##save_avatar_path", &avatarPath);
