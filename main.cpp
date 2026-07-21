@@ -12,6 +12,14 @@ using namespace Firesteel;
 #include "embedded.hpp"
 #include "external/ImGuizmo/ImGuizmo.h"
 
+
+
+
+const uint changelogAlternator=1;
+
+
+
+
 enum AffectionState {
 	AS_UNAFFECTED,
 	AS_ON_TRUE,
@@ -126,6 +134,8 @@ bool hideImGui=false;
 bool layerInspectorWindowOpen=false;
 bool layersOpen=true;
 bool configOpen=false;
+bool changelogOpen=true;
+std::string changelog="Failed to get changelog!\nFile \"CHANGELOG\" doesn't exist.";
 ImGuizmo::MODE currentGizmoMode=ImGuizmo::WORLD;
 ImGuizmo::OPERATION currentGizmoOperation=ImGuizmo::TRANSLATE;
 
@@ -332,6 +342,7 @@ class TubePngApp : public App {
 		cfg["background"]["color"] = { window.getClearColor().r, window.getClearColor().g, window.getClearColor().b, window.getClearColor().a };
 		cfg["avatar"]["blinking"] = calcBlinking;
 		cfg["avatar"]["last"] = avatarPath;
+		cfg["last_changelog"] = changelogAlternator;
 		std::ofstream o(tPath);
 		o << cfg << std::endl;
 		o.close();
@@ -371,6 +382,7 @@ class TubePngApp : public App {
 					transparentWindow=cfg["background"]["color"][3]==0;
 				}
 			}
+			if(cfg.contains("last_changelog")) changelogOpen = cfg["last_changelog"]==changelogAlternator;
 		} catch(const std::runtime_error& e) {
 			LOGF_ERRR("Failed to parse config: %s", e.what());
 			return false;
@@ -467,6 +479,25 @@ class TubePngApp : public App {
 		colors[ImGuiCol_ResizeGrip] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
 		colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.14f, 0.45f, 0.41f, 0.40f);
 		colors[ImGuiCol_ResizeGripActive] = ImVec4(0.14f, 0.45f, 0.41f, 0.60f);
+
+		if (std::filesystem::exists("../CHANGELOG")) {
+			std::ifstream ifs("../CHANGELOG");
+			if (ifs.is_open()) {
+				std::stringstream buffer;
+				buffer << ifs.rdbuf();
+				std::string file_contents = buffer.str();
+				changelog = file_contents;
+			}
+		}
+		if (std::filesystem::exists("CHANGELOG")) {
+			std::ifstream ifs("CHANGELOG");
+			if (ifs.is_open()) {
+				std::stringstream buffer;
+				buffer << ifs.rdbuf();
+				std::string file_contents = buffer.str();
+				changelog = file_contents;
+			}
+		}
 	}
 	
 	void onUpdate() override {
@@ -685,6 +716,11 @@ class TubePngApp : public App {
 		ImGui::SameLine();
 		if(ImGui::Button("Layers")) layersOpen=true;
 		ImGui::End();
+		if(changelogOpen) {
+			ImGui::Begin("Changelog");
+			ImGui::Text(changelog.c_str());
+			ImGui::End();
+		}
 		if(configOpen) {
 			ImGui::Begin("Options", &configOpen);
 			if(ImGui::BeginPopupModal("Select Microphone")) {

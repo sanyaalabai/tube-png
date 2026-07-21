@@ -1,0 +1,14 @@
+>- 1.1.0
+Added:
+• F1 hides UI now
+• Added simple local keybinds
+• Added better branding
+• Changed UI theme (now modern!)
+• Added idle animations
+• UI now has dockspace, so you can dock windows to The Window now :>
+• Gizmo
+• Added this CHANGELOG file and window
+
+Fixes:
+• SRGB color space now works properly
+• Fixed some logic of onTalk animations
